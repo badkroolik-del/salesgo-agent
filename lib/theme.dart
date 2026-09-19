@@ -27,9 +27,9 @@ const goGradient = LinearGradient(
   begin: Alignment.topLeft,
   end: Alignment.bottomRight,
 );
-// Pastki menyu uchun 2 yonli (chap->o'ng) gorizontal gradient
+// Pastki menyu uchun 2 yonli (chap yashil -> o'ng ko'k) gorizontal gradient
 const navGradient = LinearGradient(
-  colors: [brand, brandDark, brand2],
+  colors: [brand, brand2],
   begin: Alignment.centerLeft,
   end: Alignment.centerRight,
 );

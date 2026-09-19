@@ -84,28 +84,44 @@ class _AgentShellState extends State<AgentShell> {
     ];
     return Scaffold(
       body: IndexedStack(index: idx, children: tabs),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-            gradient: navGradient, boxShadow: softShadow),
-        child: NavigationBarTheme(
-          data: NavigationBarThemeData(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            indicatorColor: Colors.white.withOpacity(0.24),
-            labelTextStyle: MaterialStateProperty.all(const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w600)),
-            iconTheme: MaterialStateProperty.resolveWith((s) => IconThemeData(
-                color: s.contains(MaterialState.selected)
-                    ? Colors.white
-                    : Colors.white.withOpacity(0.7))),
+      // Suzuvchi (floating) dumaloq pastki menyu — tekis to'rtburchak emas
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          decoration: BoxDecoration(
+            gradient: navGradient,
+            borderRadius: BorderRadius.circular(26),
+            boxShadow: [
+              BoxShadow(
+                  color: brand.withOpacity(0.35),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8)),
+            ],
           ),
-          child: NavigationBar(
-            backgroundColor: Colors.transparent,
-            selectedIndex: idx,
-            onDestinationSelected: (i) => setState(() => idx = i),
-            destinations: [
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(26),
+            child: NavigationBarTheme(
+              data: NavigationBarThemeData(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                height: 64,
+                indicatorColor: Colors.white.withOpacity(0.26),
+                labelTextStyle: MaterialStateProperty.all(const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600)),
+                iconTheme: MaterialStateProperty.resolveWith((s) =>
+                    IconThemeData(
+                        color: s.contains(MaterialState.selected)
+                            ? Colors.white
+                            : Colors.white.withOpacity(0.7))),
+              ),
+              child: NavigationBar(
+                backgroundColor: Colors.transparent,
+                selectedIndex: idx,
+                onDestinationSelected: (i) => setState(() => idx = i),
+                destinations: [
               NavigationDestination(
                   icon: const Icon(Icons.dashboard_outlined),
                   selectedIcon: const Icon(Icons.dashboard),
@@ -126,7 +142,9 @@ class _AgentShellState extends State<AgentShell> {
                   icon: const Icon(Icons.person_outline),
                   selectedIcon: const Icon(Icons.person),
                   label: tr('Profil', 'Профиль')),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -237,7 +255,7 @@ class _DashboardTabState extends State<DashboardTab> {
               children: [
                 Row(
                   children: [
-                    const AnimatedWordmark(size: 20, base: Colors.white),
+                    const AnimatedWordmark(size: 27, base: Colors.white),
                     const Spacer(),
                     IconButton(
                       tooltip: tr('Aksiyalar', 'Акции'),
@@ -430,20 +448,55 @@ class _OfflineQueueScreenState extends State<OfflineQueueScreen> {
   Future<void> _sync() async {
     if (syncing) return;
     setState(() => syncing = true);
-    Map<String, int> res = {};
+    Map<String, dynamic> res = {};
     try {
       res = await SyncStore.flush(null);
     } catch (_) {}
     await _load();
     if (!mounted) return;
     setState(() => syncing = false);
-    final left = res['left'] ?? items.length;
-    snack(
-        context,
-        left == 0
-            ? tr('Hammasi yuborildi ✓✓', 'Всё отправлено ✓✓')
-            : tr('Qisman yuborildi, $left qoldi',
-                'Отправлено частично, осталось $left'));
+    final left = (res['left'] ?? items.length) as int;
+    final warnings = (res['warnings'] as List?) ?? [];
+    if (warnings.isNotEmpty) {
+      // Tovar qoldig'i yetmagan zakazlar haqida ogohlantirish (K1)
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          icon: const Icon(Icons.warning_amber_rounded, color: warn, size: 40),
+          title: Text(tr('Diqqat: tovar qoldig‘i', 'Внимание: остаток товара'),
+              textAlign: TextAlign.center),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                  tr('Ba‘zi tovarlar omborda yetarli emas edi:',
+                      'Некоторых товаров не хватало на складе:'),
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              ...warnings.map((w) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text('• $w',
+                        style: const TextStyle(fontSize: 13, color: ink)),
+                  )),
+            ],
+          ),
+          actions: [
+            Center(
+                child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('OK'))),
+          ],
+        ),
+      );
+    } else {
+      snack(
+          context,
+          left == 0
+              ? tr('Hammasi yuborildi ✓✓', 'Всё отправлено ✓✓')
+              : tr('Qisman yuborildi, $left qoldi',
+                  'Отправлено частично, осталось $left'));
+    }
   }
 
   Future<void> _edit(Map<String, dynamic> o) async {
@@ -657,7 +710,7 @@ class _BigSyncButtonState extends State<_BigSyncButton>
   late final AnimationController _c = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 900));
   bool syncing = false;
-  int done = 0, total = 0, sentO = 0, sentP = 0, pending = 0, po = 0, pp = 0;
+  int done = 0, total = 0, sentO = 0, sentP = 0, pending = 0, po = 0, pp = 0, pv = 0;
 
   @override
   void initState() {
@@ -674,11 +727,13 @@ class _BigSyncButtonState extends State<_BigSyncButton>
   Future<void> _refreshPending() async {
     final o = await SyncStore.pendingOrders();
     final p = await SyncStore.pendingPhotos();
+    final vv = await SyncStore.pendingVisits();
     if (mounted) {
       setState(() {
         po = o;
         pp = p;
-        pending = o + p;
+        pv = vv;
+        pending = o + p + vv;
       });
     }
   }
@@ -693,7 +748,7 @@ class _BigSyncButtonState extends State<_BigSyncButton>
       sentP = 0;
     });
     _c.repeat();
-    Map<String, int> res = {'orders': 0, 'photos': 0};
+    Map<String, dynamic> res = {'orders': 0, 'photos': 0};
     try {
       res = await SyncStore.flush((d, t, o, p) {
         if (mounted) {
@@ -712,20 +767,39 @@ class _BigSyncButtonState extends State<_BigSyncButton>
     await widget.onDone();
     if (!mounted) return;
     setState(() => syncing = false);
-    final o = res['orders'] ?? 0, ph = res['photos'] ?? 0;
+    final o = (res['orders'] ?? 0) as int,
+        ph = (res['photos'] ?? 0) as int,
+        vz = (res['visits'] ?? 0) as int;
+    final warns = (res['warnings'] as List?) ?? [];
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        icon: const Icon(Icons.cloud_done, color: ok, size: 42),
+        icon: Icon(warns.isEmpty ? Icons.cloud_done : Icons.warning_amber_rounded,
+            color: warns.isEmpty ? ok : warn, size: 42),
         title: Text(tr('Sinxron tugadi', 'Синхронизация завершена'),
             textAlign: TextAlign.center),
-        content: Text(
-          (o == 0 && ph == 0)
-              ? tr('Hammasi allaqachon sinxron ✓',
-                  'Всё уже синхронизировано ✓')
-              : '${tr('Zakazlar', 'Заказы')}: $o\n${tr('Rasmlar', 'Фото')}: $ph',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              (o == 0 && ph == 0 && vz == 0)
+                  ? tr('Hammasi allaqachon sinxron ✓',
+                      'Всё уже синхронизировано ✓')
+                  : '${tr('Zakaz', 'Заказы')}: $o · ${tr('Rasm', 'Фото')}: $ph · ${tr('Vizit', 'Визит')}: $vz',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
+            if (warns.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(tr('Tovar qoldig‘i yetmadi:', 'Не хватило остатка:'),
+                  style: const TextStyle(
+                      color: warn, fontWeight: FontWeight.w800, fontSize: 13)),
+              const SizedBox(height: 4),
+              ...warns.map((w) => Text('• $w',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12.5, color: ink))),
+            ],
+          ],
         ),
         actions: [
           Center(
@@ -791,13 +865,13 @@ class _BigSyncButtonState extends State<_BigSyncButton>
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
                               fontSize: 16.5)),
-                      if (pending > 0)
-                        Text(
-                            '${tr('Zakaz', 'Заказы')}: $po · ${tr('Rasm', 'Фото')}: $pp',
-                            style: TextStyle(
-                                color: Colors.white.withOpacity(0.9),
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(
+                          '${tr('Zakaz', 'Заказ')}: $po · ${tr('Rasm', 'Фото')}: $pp · ${tr('Vizit', 'Визит')}: $pv',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.92),
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700)),
                     ],
                   ),
                 ],
@@ -2061,12 +2135,22 @@ class _NakladnoyScreenState extends State<NakladnoyScreen> {
   }
 
   Future<void> _share() async {
+    final id = order['id'];
     try {
-      await shareCsv('nakladnoy_${order['id']}.csv', _csvRows(),
-          subject: 'Nakladnoy #${order['id']}',
+      // Serverда yasalgan rasmiy .xlsx nakladnoy (chegaralar bilan)
+      final bytes = await Api.getBytes('/api/orders/$id/nakladnoy');
+      await shareBytes('nakladnoy_$id.xlsx', bytes,
+          subject: 'Nakladnoy #$id',
           text: '${widget.clientName} · ${money(asNum(order['total']))}');
-    } catch (e) {
-      if (mounted) snack(context, '$e');
+    } catch (_) {
+      // Oflayn yoki xato -> CSV zaxira
+      try {
+        await shareCsv('nakladnoy_$id.csv', _csvRows(),
+            subject: 'Nakladnoy #$id',
+            text: '${widget.clientName} · ${money(asNum(order['total']))}');
+      } catch (e) {
+        if (mounted) snack(context, '$e');
+      }
     }
   }
 
@@ -2399,11 +2483,25 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     }
     csv.add([]);
     csv.add(['', tr('Qoldiq', 'Остаток'), asNum(data['balance'] ?? widget.balance)]);
+    final id = widget.clientId;
+    var qp = '';
+    if (range != null) {
+      final d1 = range!.start.toIso8601String().substring(0, 10);
+      final d2 = range!.end.toIso8601String().substring(0, 10);
+      qp = '?d1=$d1&d2=$d2';
+    }
     try {
-      await shareCsv('akt_sverka_${widget.clientId}.csv', csv,
+      // Serverда yasalgan rasmiy .xlsx akt-sverka (chegaralar bilan)
+      final bytes = await Api.getBytes('/api/reconcile/$id/xlsx$qp');
+      await shareBytes('akt_sverka_$id.xlsx', bytes,
           subject: '${tr('Akt-sverka', 'Акт-сверка')} — ${widget.name}');
-    } catch (e) {
-      if (mounted) snack(context, '$e');
+    } catch (_) {
+      try {
+        await shareCsv('akt_sverka_$id.csv', csv,
+            subject: '${tr('Akt-sverka', 'Акт-сверка')} — ${widget.name}');
+      } catch (e) {
+        if (mounted) snack(context, '$e');
+      }
     }
   }
 
@@ -3033,14 +3131,23 @@ class _OrdersTabState extends State<OrdersTab> {
                             const SizedBox(height: 10),
                         itemBuilder: (_, i) {
                           if (i >= all.length) {
-                            return const Padding(
-                              padding: EdgeInsets.all(16),
-                              child: Center(
-                                  child: SizedBox(
-                                      height: 24,
-                                      width: 24,
+                            return Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const SizedBox(
+                                      height: 18,
+                                      width: 18,
                                       child: CircularProgressIndicator(
-                                          strokeWidth: 2, color: brand))),
+                                          strokeWidth: 2, color: brand)),
+                                  const SizedBox(width: 10),
+                                  Text(tr('Yuklanmoqda…', 'Загрузка…'),
+                                      style: const TextStyle(
+                                          color: muted,
+                                          fontWeight: FontWeight.w600)),
+                                ],
+                              ),
                             );
                           }
                           return OrderTile(all[i],
@@ -3619,14 +3726,24 @@ class _VisitScreenState extends State<VisitScreen> {
             asNum(widget.client['lat']).toDouble(),
             asNum(widget.client['lng']).toDouble());
       }
-      final d = await Api.post('/api/visits/checkin', {
+      final id = await SyncStore.sendOrQueueVisit({
         'client_id': widget.client['id'],
         'lat': pos?.latitude,
         'lng': pos?.longitude,
         'gps_ok': pos != null,
         'client_uuid': DateTime.now().millisecondsSinceEpoch.toString(),
       });
-      setState(() => visitId = d['id']);
+      if (id != null) {
+        setState(() => visitId = id); // onlayn: server id
+      } else {
+        // Oflayn: navbatga saqlandi, ish davom etadi (visit_id keyin sinxron)
+        setState(() => visitId = -1);
+        if (mounted) {
+          snack(context,
+              tr('Tashrif oflayn saqlandi (sinxron qiling)',
+                  'Визит сохранён офлайн (синхронизируйте)'));
+        }
+      }
     } catch (e) {
       if (mounted) {
         setState(() => checkinFailed = true);
@@ -3701,8 +3818,10 @@ class _VisitScreenState extends State<VisitScreen> {
   Future<void> _addPhoto(String type) async {
     final path = await _capturePhoto();
     if (path == null) return;
-    final okSent =
-        await SyncStore.sendOrQueuePhoto(visitId: visitId, path: path, type: type);
+    final okSent = await SyncStore.sendOrQueuePhoto(
+        visitId: (visitId != null && visitId! > 0) ? visitId : null,
+        path: path,
+        type: type);
     if (mounted) {
       setState(() {
         if (type == 'before') {
@@ -4907,7 +5026,8 @@ class _OrderScreenState extends State<OrderScreen> {
   Future<void> _submit(String pay, {bool draft = false}) async {
     final body = <String, dynamic>{
       'client_id': widget.client['id'],
-      'visit_id': widget.visitId,
+      // -1 = oflayn tashrif (server id yo'q) -> null yuboriladi
+      'visit_id': (widget.visitId > 0) ? widget.visitId : null,
       'pay_type': pay,
       'status': draft ? 'draft' : 'new',
       'comment': _orderComment.text.trim(),

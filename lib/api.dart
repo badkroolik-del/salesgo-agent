@@ -109,6 +109,14 @@ class Api {
     return j;
   }
 
+  /// Serverdan fayl baytlarini oladi (masalan .xlsx nakladnoy/akt-sverka).
+  static Future<List<int>> getBytes(String path) async {
+    final r = await http.get(Uri.parse('$base$path'), headers: _h);
+    if (r.statusCode == 401) throw 'auth';
+    if (r.statusCode >= 400) throw _statusMsg(r.statusCode);
+    return r.bodyBytes;
+  }
+
   /// Rasm yuklash -> URL qaytaradi.
   static Future<String> uploadPhoto(File file) async {
     final req = http.MultipartRequest('POST', Uri.parse('$base/api/upload'));

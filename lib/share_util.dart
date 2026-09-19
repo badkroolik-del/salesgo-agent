@@ -20,6 +20,19 @@ Future<void> shareCsv(String fileName, List<List<dynamic>> rows,
       subject: subject, text: text);
 }
 
+/// Serverdan olingan fayl baytlarini (masalan .xlsx) saqlab ulashish.
+Future<void> shareBytes(String fileName, List<int> bytes,
+    {String mime =
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    String? subject,
+    String? text}) async {
+  final dir = await getTemporaryDirectory();
+  final f = File('${dir.path}/$fileName');
+  await f.writeAsBytes(bytes, flush: true);
+  await Share.shareXFiles([XFile(f.path, mimeType: mime)],
+      subject: subject, text: text);
+}
+
 /// Oddiy matnni ulashish.
 Future<void> shareText(String textBody, {String? subject}) =>
     Share.share(textBody, subject: subject);
