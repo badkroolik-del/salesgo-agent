@@ -63,12 +63,18 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
-      # Brend launcher ikon (xato bo'lsa ham build to'xtamaydi)
+      # Brend launcher ikon: foydalanuvchi bergan aniq logo serverdan olinadi;
+      # bo'lmasa make_icon.py bilan yaratiladi. (xato bo'lsa ham build davom etadi)
       - name: App icon
         continue-on-error: true
         run: |
-          pip install pillow
-          python3 tools/make_icon.py
+          mkdir -p assets/icon
+          if curl -fsSL https://salesgo.uz/uploads/appicon.png -o assets/icon/icon.png; then
+            cp assets/icon/icon.png assets/icon/foreground.png
+            echo "Custom icon downloaded"
+          else
+            pip install pillow && python3 tools/make_icon.py
+          fi
           dart pub global activate flutter_launcher_icons
           dart pub global run flutter_launcher_icons
 
