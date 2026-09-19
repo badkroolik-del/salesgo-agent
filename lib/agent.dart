@@ -353,6 +353,23 @@ class _DashboardTabState extends State<DashboardTab> {
                 const SizedBox(height: 16),
                 // KATTA sinxron tugmasi — bosilsa server bilan sinxron
                 _BigSyncButton(onDone: _load),
+                const SizedBox(height: 8),
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () async {
+                      await Navigator.push(context,
+                          fadeRoute(const OfflineQueueScreen()));
+                      _load();
+                    },
+                    icon: const Icon(Icons.checklist_rtl,
+                        size: 18, color: brand),
+                    label: Text(
+                        tr('Navbat (yuborilmagan zakazlar)',
+                            'Очередь (неотправленные)'),
+                        style: const TextStyle(
+                            color: brand, fontWeight: FontWeight.w700)),
+                  ),
+                ),
                 SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня')),
                 if (loading)
                   const Column(children: [
@@ -383,6 +400,249 @@ class _DashboardTabState extends State<DashboardTab> {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ============ OFLAYN NAVBAT (yuborilmagan zakazlar, 1/2 ptichka) ============
+String payLabel(String p) => p == 'debt'
+    ? tr('Qarz', 'Долг')
+    : (p == 'transfer' ? tr('O‘tkazma', 'Перевод') : tr('Naqd', 'Наличные'));
+
+class OfflineQueueScreen extends StatefulWidget {
+  const OfflineQueueScreen({super.key});
+  @override
+  State<OfflineQueueScreen> createState() => _OfflineQueueScreenState();
+}
+
+class _OfflineQueueScreenState extends State<OfflineQueueScreen> {
+  List<Map<String, dynamic>> items = [];
+  bool loading = true;
+  bool syncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    items = await SyncStore.listOrders();
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _sync() async {
+    if (syncing) return;
+    setState(() => syncing = true);
+    Map<String, int> res = {};
+    try {
+      res = await SyncStore.flush(null);
+    } catch (_) {}
+    await _load();
+    if (!mounted) return;
+    setState(() => syncing = false);
+    final left = res['left'] ?? items.length;
+    snack(
+        context,
+        left == 0
+            ? tr('Hammasi yuborildi ✓✓', 'Всё отправлено ✓✓')
+            : tr('Qisman yuborildi, $left qoldi',
+                'Отправлено частично, осталось $left'));
+  }
+
+  Future<void> _edit(Map<String, dynamic> o) async {
+    String pay = '${o['pay_type'] ?? 'cash'}';
+    final comment = TextEditingController(text: '${o['comment'] ?? ''}');
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        Widget chip(String label, String val) {
+          final sel = pay == val;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              label: Text(label),
+              selected: sel,
+              onSelected: (_) => setS(() => pay = val),
+              selectedColor: brand,
+              labelStyle: TextStyle(
+                  color: sel ? Colors.white : ink,
+                  fontWeight: FontWeight.w600),
+            ),
+          );
+        }
+
+        return Padding(
+          padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('${o['client_name'] ?? tr('Zakaz', 'Заказ')}',
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text('${money(asNum(o['total']))} · ${(o['items'] as List?)?.length ?? 0} ${tr('tovar', 'товар')}',
+                  style: const TextStyle(color: muted)),
+              const SizedBox(height: 14),
+              Text(tr('To‘lov turi', 'Вид оплаты'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(children: [
+                chip(tr('Naqd', 'Наличные'), 'cash'),
+                chip(tr('O‘tkazma', 'Перевод'), 'transfer'),
+                chip(tr('Qarz', 'Долг'), 'debt'),
+              ]),
+              const SizedBox(height: 12),
+              TextField(
+                controller: comment,
+                decoration: InputDecoration(
+                  labelText: tr('Izoh', 'Комментарий'),
+                  prefixIcon: const Icon(Icons.comment_outlined),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await SyncStore.removeOrder('${o['client_uuid']}');
+                      await _load();
+                    },
+                    icon: const Icon(Icons.delete_outline, color: danger),
+                    label: Text(tr('O‘chirish', 'Удалить'),
+                        style: const TextStyle(color: danger)),
+                    style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: danger),
+                        padding: const EdgeInsets.symmetric(vertical: 14)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: GradientButton(
+                    text: tr('Saqlash', 'Сохранить'),
+                    icon: Icons.check,
+                    onTap: () async {
+                      final nb = Map<String, dynamic>.from(o);
+                      nb['pay_type'] = pay;
+                      nb['comment'] = comment.text.trim();
+                      Navigator.pop(ctx);
+                      await SyncStore.updateOrder('${o['client_uuid']}', nb);
+                      await _load();
+                    },
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          child: Row(children: [
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back, color: Colors.white)),
+            Expanded(
+              child: Text(tr('Yuborilmagan navbat', 'Очередь отправки'),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800)),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : (items.isEmpty
+                  ? EmptyState(
+                      icon: Icons.cloud_done_outlined,
+                      text: tr('Navbat bo‘sh — hammasi yuborilgan ✓✓',
+                          'Очередь пуста — всё отправлено ✓✓'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final o = items[i];
+                        final cnt = (o['items'] as List?)?.length ?? 0;
+                        return Panel(
+                          padding: const EdgeInsets.all(14),
+                          onTap: () => _edit(o),
+                          child: Row(children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                  color: warn.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: const Icon(Icons.schedule, color: warn),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      '${o['client_name'] ?? tr('Mijoz', 'Клиент')}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          color: ink)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                      '${money(asNum(o['total']))} · $cnt ${tr('tovar', 'товар')} · ${payLabel('${o['pay_type']}')}',
+                                      style: const TextStyle(
+                                          color: muted, fontSize: 12.5)),
+                                ],
+                              ),
+                            ),
+                            // 1 ptichka = lokal saqlangan, hali yuborilmagan
+                            Column(children: [
+                              const Icon(Icons.check,
+                                  color: muted, size: 18),
+                              Text(tr('saqlandi', 'сохранён'),
+                                  style: const TextStyle(
+                                      color: muted, fontSize: 10)),
+                            ]),
+                          ]),
+                        );
+                      },
+                    )),
+        ),
+      ]),
+      bottomNavigationBar: items.isEmpty
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: GradientButton(
+                  text: syncing
+                      ? tr('Yuborilmoqda…', 'Отправка…')
+                      : tr('Sinxron qilish (✓✓)', 'Синхронизировать (✓✓)'),
+                  icon: Icons.cloud_upload,
+                  busy: syncing,
+                  onTap: _sync,
+                ),
+              ),
+            ),
     );
   }
 }
@@ -4657,6 +4917,9 @@ class _OrderScreenState extends State<OrderScreen> {
       'comment': _orderComment.text.trim(),
       'delivery_date': _deliveryDate?.toIso8601String().substring(0, 10),
       'client_uuid': DateTime.now().millisecondsSinceEpoch.toString(),
+      // Lokal ko'rsatish uchun (server e'tiborsiz qoldiradi):
+      'client_name': widget.client['name'],
+      'total': total,
       'items': [
         ...cart.values.map((e) => {
               'product_id': e['product']['id'],

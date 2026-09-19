@@ -34,6 +34,48 @@ class SyncStore {
   static Future<int> pendingTotal() async =>
       (await pendingOrders()) + (await pendingPhotos());
 
+  /// Navbatdagi (yuborilmagan) zakazlar ro'yxati — tahrir/ko'rish uchun.
+  static Future<List<Map<String, dynamic>>> listOrders() async {
+    final sp = await SharedPreferences.getInstance();
+    final out = <Map<String, dynamic>>[];
+    for (final s in sp.getStringList(_kOrders) ?? []) {
+      try {
+        out.add(Map<String, dynamic>.from(jsonDecode(s)));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// client_uuid bo'yicha navbatdan o'chiradi.
+  static Future<void> removeOrder(String clientUuid) async {
+    final sp = await SharedPreferences.getInstance();
+    final list = sp.getStringList(_kOrders) ?? [];
+    list.removeWhere((s) {
+      try {
+        return '${jsonDecode(s)['client_uuid']}' == clientUuid;
+      } catch (_) {
+        return false;
+      }
+    });
+    await sp.setStringList(_kOrders, list);
+  }
+
+  /// client_uuid bo'yicha navbatdagi zakazni yangilaydi (to'lov turi, izoh...).
+  static Future<void> updateOrder(
+      String clientUuid, Map<String, dynamic> body) async {
+    final sp = await SharedPreferences.getInstance();
+    final list = sp.getStringList(_kOrders) ?? [];
+    for (int i = 0; i < list.length; i++) {
+      try {
+        if ('${jsonDecode(list[i])['client_uuid']}' == clientUuid) {
+          list[i] = jsonEncode(body);
+          break;
+        }
+      } catch (_) {}
+    }
+    await sp.setStringList(_kOrders, list);
+  }
+
   /// Zakazni yuborishga urinadi. Muvaffaqiyatli bo'lmasa navbatga qo'yadi.
   /// true = darhol yuborildi, false = navbatga tushdi.
   static Future<bool> sendOrQueueOrder(Map<String, dynamic> body) async {
