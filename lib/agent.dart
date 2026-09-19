@@ -86,7 +86,7 @@ class _AgentShellState extends State<AgentShell> {
       body: IndexedStack(index: idx, children: tabs),
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(
-            gradient: brandGradient, boxShadow: softShadow),
+            gradient: navGradient, boxShadow: softShadow),
         child: NavigationBarTheme(
           data: NavigationBarThemeData(
             backgroundColor: Colors.transparent,
@@ -239,6 +239,15 @@ class _DashboardTabState extends State<DashboardTab> {
                   children: [
                     const AnimatedWordmark(size: 20, base: Colors.white),
                     const Spacer(),
+                    IconButton(
+                      tooltip: tr('Aksiyalar', 'Акции'),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.push(
+                          context, fadeRoute(const PromosScreen())),
+                      icon: const Icon(Icons.local_offer_outlined,
+                          color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
@@ -3749,6 +3758,126 @@ class _VisitScreenState extends State<VisitScreen> {
   }
 }
 
+// ================= AKSIYALAR (server bilan sinxron) =================
+class PromosScreen extends StatefulWidget {
+  const PromosScreen({super.key});
+  @override
+  State<PromosScreen> createState() => _PromosScreenState();
+}
+
+class _PromosScreenState extends State<PromosScreen> {
+  List items = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final d = await Api.get('/api/promos');
+      items = d['items'] ?? [];
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  String _kindLabel(String k) => k == 'price'
+      ? tr('Maxsus narx', 'Спец. цена')
+      : (k == 'gift' ? tr('Sovg‘a', 'Подарок') : tr('Chegirma', 'Скидка'));
+
+  String _value(Map p) {
+    switch ('${p['kind']}') {
+      case 'price':
+        return money(asNum(p['special_price']));
+      case 'gift':
+        return '${asNum(p['min_qty']).round()}+${asNum(p['gift_qty']).round()}'
+            '${p['gift_name'] != null ? ' · ${p['gift_name']}' : ''}';
+      default:
+        return '−${asNum(p['discount_pct']).round()}%';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          child: Row(children: [
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back, color: Colors.white)),
+            Text(tr('Aksiyalar', 'Акции'),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800)),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : (items.isEmpty
+                  ? EmptyState(
+                      icon: Icons.local_offer_outlined,
+                      text: tr('Faol aksiya yo‘q', 'Нет активных акций'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final p = items[i] as Map;
+                        return Panel(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                  color: accent.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: const Icon(Icons.local_offer,
+                                  color: accent),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('${p['name'] ?? ''}',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          color: ink)),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                      '${_kindLabel('${p['kind']}')} · ${p['product_name'] ?? tr('Barcha mahsulot', 'Все товары')}',
+                                      style: const TextStyle(
+                                          color: muted, fontSize: 12.5)),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                  color: accent,
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: Text(_value(p),
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 12.5)),
+                            ),
+                          ]),
+                        );
+                      },
+                    )),
+        ),
+      ]),
+    );
+  }
+}
+
 // ================= ZAKAZ (savat + blok/dona + rasm) =================
 class OrderScreen extends StatefulWidget {
   final Map client;
@@ -3766,6 +3895,9 @@ class _OrderScreenState extends State<OrderScreen> {
   String cat = '';
   final _orderComment = TextEditingController();
   DateTime? _deliveryDate;
+  // Aksiyalar (server bilan sinxron)
+  final Map<int, Map> promoByProduct = {}; // product_id -> promo
+  Map? promoAll; // barcha mahsulotga foizli aksiya
 
   @override
   void initState() {
@@ -3784,7 +3916,73 @@ class _OrderScreenState extends State<OrderScreen> {
       final d = await Api.get('/api/products?limit=500');
       products = d['items'] ?? [];
     } catch (_) {}
+    try {
+      final pr = await Api.get('/api/promos');
+      for (final x in (pr['items'] ?? [])) {
+        if (x['product_id'] != null) {
+          promoByProduct[x['product_id'] as int] = x;
+        } else if ('${x['kind']}' == 'percent') {
+          promoAll = x; // barcha mahsulotga chegirma
+        }
+      }
+    } catch (_) {}
     if (mounted) setState(() => loading = false);
+  }
+
+  // Mahsulotga tegishli aksiya (avval maxsus, keyin umumiy foiz)
+  Map? _promoFor(int id) => promoByProduct[id] ?? promoAll;
+
+  // Aksiyani hisobga olgan birlik narx
+  num _effPrice(Map p) {
+    final base = asNum(p['price']);
+    final pr = _promoFor(p['id'] as int);
+    if (pr == null) return base;
+    if ('${pr['kind']}' == 'percent') {
+      return base * (1 - asNum(pr['discount_pct']) / 100);
+    }
+    if ('${pr['kind']}' == 'price' && pr['special_price'] != null) {
+      return asNum(pr['special_price']);
+    }
+    return base; // gift -> narx o'zgarmaydi
+  }
+
+  // Qisqa aksiya yozuvi (badge uchun), aks holda null
+  String? _promoLabel(Map p) {
+    final pr = _promoFor(p['id'] as int);
+    if (pr == null) return null;
+    switch ('${pr['kind']}') {
+      case 'percent':
+        return '−${asNum(pr['discount_pct']).round()}%';
+      case 'price':
+        return tr('Aksiya', 'Акция');
+      case 'gift':
+        return '${asNum(pr['min_qty']).round()}+${asNum(pr['gift_qty']).round()}';
+    }
+    return null;
+  }
+
+  // Savatdagi sovg'alarni hisoblaydi: gift_product_id -> bepul dona
+  Map<int, int> _gifts() {
+    final g = <int, int>{};
+    for (final e in cart.values) {
+      final p = e['product'] as Map;
+      final pr = promoByProduct[p['id']];
+      if (pr != null && '${pr['kind']}' == 'gift') {
+        final mq = asNum(pr['min_qty']).toInt();
+        final gq = asNum(pr['gift_qty']).toInt();
+        final gid = pr['gift_product_id'];
+        if (mq > 0 && gq > 0 && gid != null) {
+          final free = (asNum(e['qty']).toInt() ~/ mq) * gq;
+          if (free > 0) g[gid as int] = (g[gid] ?? 0) + free;
+        }
+      }
+    }
+    return g;
+  }
+
+  String _prodName(int id) {
+    final p = products.firstWhere((x) => x['id'] == id, orElse: () => null);
+    return p == null ? '#$id' : '${p['name']}';
   }
 
   List<String> get cats {
@@ -3804,7 +4002,7 @@ class _OrderScreenState extends State<OrderScreen> {
       }).toList();
 
   num get total => cart.values
-      .fold<num>(0, (s, e) => s + asNum(e['product']['price']) * asNum(e['qty']));
+      .fold<num>(0, (s, e) => s + _effPrice(e['product'] as Map) * asNum(e['qty']));
   int get itemsCount => cart.length;
 
   void _openProduct(Map p) {
@@ -4001,6 +4199,12 @@ class _OrderScreenState extends State<OrderScreen> {
                             fontSize: 18,
                             fontWeight: FontWeight.w800)),
                   ),
+                  IconButton(
+                    tooltip: tr('Aksiyalar', 'Акции'),
+                    onPressed: () => Navigator.push(
+                        context, fadeRoute(const PromosScreen())),
+                    icon: const Icon(Icons.local_offer, color: Colors.white),
+                  ),
                 ]),
                 const SizedBox(height: 10),
                 Padding(
@@ -4115,6 +4319,10 @@ class _OrderScreenState extends State<OrderScreen> {
     final id = p['id'] as int;
     final qty = (cart[id]?['qty'] ?? 0) as int;
     final stock = asNum(p['stock']);
+    final promoLabel = _promoLabel(p);
+    final base = asNum(p['price']);
+    final eff = _effPrice(p);
+    final discounted = eff < base - 0.5;
     return Panel(
       padding: const EdgeInsets.all(12),
       onTap: () => _openProduct(p),
@@ -4125,16 +4333,44 @@ class _OrderScreenState extends State<OrderScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('${p['name'] ?? ''}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, color: ink)),
+              Row(children: [
+                Flexible(
+                  child: Text('${p['name'] ?? ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, color: ink)),
+                ),
+                if (promoLabel != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                        color: accent,
+                        borderRadius: BorderRadius.circular(6)),
+                    child: Text(promoLabel,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ]),
               const SizedBox(height: 3),
               Row(children: [
-                Text(money(asNum(p['price'])),
-                    style: const TextStyle(
-                        color: brand, fontWeight: FontWeight.w700)),
+                if (discounted) ...[
+                  Text(money(base),
+                      style: const TextStyle(
+                          color: muted,
+                          fontSize: 11.5,
+                          decoration: TextDecoration.lineThrough)),
+                  const SizedBox(width: 6),
+                ],
+                Text(money(eff),
+                    style: TextStyle(
+                        color: discounted ? accent : brand,
+                        fontWeight: FontWeight.w700)),
                 const SizedBox(width: 8),
                 Text('· ${stock.round()} ${p['unit'] ?? 'dona'}',
                     style: const TextStyle(color: muted, fontSize: 12)),
@@ -4199,7 +4435,7 @@ class _OrderScreenState extends State<OrderScreen> {
                       final p = e['product'];
                       final qd = e['qty'] as int;
                       final id = p['id'] as int;
-                      final price = asNum(p['price']);
+                      final price = _effPrice(p as Map);
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 6),
                         child: Row(children: [
@@ -4270,6 +4506,29 @@ class _OrderScreenState extends State<OrderScreen> {
                     }).toList(),
                   ),
                 ),
+                // Sovg'alar (aksiya bo'yicha bepul)
+                ..._gifts().entries.map((g) => Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Row(children: [
+                        const Icon(Icons.card_giftcard,
+                            color: accent, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: Text(
+                                '${tr('Sovg‘a', 'Подарок')}: ${_prodName(g.key)}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: accent,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12.5))),
+                        Text('×${g.value}  ${tr('bepul', 'бесплатно')}',
+                            style: const TextStyle(
+                                color: accent,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12.5)),
+                      ]),
+                    )),
                 const Divider(),
                 Row(children: [
                   Text(tr('Jami', 'Итого'),
@@ -4398,13 +4657,19 @@ class _OrderScreenState extends State<OrderScreen> {
       'comment': _orderComment.text.trim(),
       'delivery_date': _deliveryDate?.toIso8601String().substring(0, 10),
       'client_uuid': DateTime.now().millisecondsSinceEpoch.toString(),
-      'items': cart.values
-          .map((e) => {
-                'product_id': e['product']['id'],
-                'qty': e['qty'],
-                'price': e['product']['price'],
-              })
-          .toList(),
+      'items': [
+        ...cart.values.map((e) => {
+              'product_id': e['product']['id'],
+              'qty': e['qty'],
+              'price': _effPrice(e['product'] as Map), // aksiya narxi
+            }),
+        // Sovg'a qatorlari (bepul)
+        ..._gifts().entries.map((g) => {
+              'product_id': g.key,
+              'qty': g.value,
+              'price': 0,
+            }),
+      ],
     };
     final sent = await SyncStore.sendOrQueueOrder(body);
     if (mounted) {
