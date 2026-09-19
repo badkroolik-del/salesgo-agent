@@ -258,6 +258,14 @@ class _DashboardTabState extends State<DashboardTab> {
                     const AnimatedWordmark(size: 27, base: Colors.white),
                     const Spacer(),
                     IconButton(
+                      tooltip: tr('Vazifalar', 'Задачи'),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.push(
+                          context, fadeRoute(const TasksScreen())),
+                      icon: const Icon(Icons.checklist_rtl,
+                          color: Colors.white, size: 20),
+                    ),
+                    IconButton(
                       tooltip: tr('Aksiyalar', 'Акции'),
                       visualDensity: VisualDensity.compact,
                       onPressed: () => Navigator.push(
@@ -4312,6 +4320,190 @@ class _VisitScreenState extends State<VisitScreen> {
           ),
         ),
         const Icon(Icons.chevron_right, color: muted),
+      ]),
+    );
+  }
+}
+
+// ================= VAZIFALAR (Tasks) =================
+class TasksScreen extends StatefulWidget {
+  const TasksScreen({super.key});
+  @override
+  State<TasksScreen> createState() => _TasksScreenState();
+}
+
+class _TasksScreenState extends State<TasksScreen> {
+  List items = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final d = await Api.get('/api/tasks');
+      items = d['items'] ?? [];
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _status(int id, String st) async {
+    try {
+      await Api.post('/api/tasks/$id/status?status=$st', {});
+      await _load();
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    }
+  }
+
+  Color _statusColor(String s) => s == 'completed'
+      ? ok
+      : (s == 'overdue' ? danger : (s == 'in_progress' ? warn : info));
+  String _statusLabel(String s) => s == 'completed'
+      ? tr('Bajarildi', 'Выполнено')
+      : (s == 'overdue'
+          ? tr('Kechikkan', 'Просрочено')
+          : (s == 'in_progress'
+              ? tr('Jarayonda', 'В работе')
+              : tr('Yangi', 'Новая')));
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          child: Row(children: [
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back, color: Colors.white)),
+            Text(tr('Vazifalar', 'Задачи'),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800)),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : (items.isEmpty
+                  ? EmptyState(
+                      icon: Icons.checklist_rtl,
+                      text: tr('Vazifa yo‘q', 'Нет задач'))
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final tk = items[i] as Map;
+                          final st = '${tk['status']}';
+                          final sc = _statusColor(st);
+                          final done = st == 'completed';
+                          final prio = '${tk['priority']}';
+                          return Panel(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                          color: prio == 'high'
+                                              ? danger
+                                              : (prio == 'low'
+                                                  ? muted
+                                                  : info),
+                                          shape: BoxShape.circle)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text('${tk['title']}',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            color: ink,
+                                            decoration: done
+                                                ? TextDecoration.lineThrough
+                                                : null)),
+                                  ),
+                                  Pill(_statusLabel(st), color: sc),
+                                ]),
+                                if ('${tk['description'] ?? ''}'.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  Text('${tk['description']}',
+                                      style: const TextStyle(
+                                          color: muted, fontSize: 13)),
+                                ],
+                                const SizedBox(height: 8),
+                                Row(children: [
+                                  if (tk['client_name'] != null) ...[
+                                    const Icon(Icons.storefront,
+                                        size: 14, color: muted),
+                                    const SizedBox(width: 3),
+                                    Text('${tk['client_name']}',
+                                        style: const TextStyle(
+                                            color: muted, fontSize: 12)),
+                                    const SizedBox(width: 10),
+                                  ],
+                                  if (tk['deadline'] != null) ...[
+                                    const Icon(Icons.event,
+                                        size: 14, color: muted),
+                                    const SizedBox(width: 3),
+                                    Text('${tk['deadline']}',
+                                        style: const TextStyle(
+                                            color: muted, fontSize: 12)),
+                                  ],
+                                  if (tk['photo_required'] == true) ...[
+                                    const SizedBox(width: 8),
+                                    const Icon(Icons.photo_camera,
+                                        size: 14, color: warn),
+                                  ],
+                                  if (tk['gps_required'] == true) ...[
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.place,
+                                        size: 14, color: warn),
+                                  ],
+                                ]),
+                                if (!done) ...[
+                                  const SizedBox(height: 10),
+                                  Row(children: [
+                                    if (st != 'in_progress')
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () => _status(
+                                              tk['id'] as int, 'in_progress'),
+                                          child: Text(
+                                              tr('Boshlash', 'Начать')),
+                                        ),
+                                      ),
+                                    if (st != 'in_progress')
+                                      const SizedBox(width: 10),
+                                    Expanded(
+                                      child: FilledButton.icon(
+                                        onPressed: () => _status(
+                                            tk['id'] as int, 'completed'),
+                                        icon: const Icon(Icons.check, size: 18),
+                                        label:
+                                            Text(tr('Bajarildi', 'Готово')),
+                                        style: FilledButton.styleFrom(
+                                            backgroundColor: brand),
+                                      ),
+                                    ),
+                                  ]),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    )),
+        ),
       ]),
     );
   }
