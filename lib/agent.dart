@@ -388,7 +388,32 @@ class _DashboardTabState extends State<DashboardTab> {
                             color: brand, fontWeight: FontWeight.w700)),
                   ),
                 ),
-                SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня')),
+                Row(children: [
+                  Expanded(
+                      child: SectionTitle(
+                          tr('Bugungi marshrut', 'Маршрут на сегодня'))),
+                  TextButton.icon(
+                    onPressed: route.isEmpty
+                        ? null
+                        : () async {
+                            await Navigator.push(
+                                context,
+                                fadeRoute(RouteMapScreen(
+                                  clients: route,
+                                  onOpen: (c) async {
+                                    await Navigator.push(context,
+                                        fadeRoute(ClientCardScreen(client: c)));
+                                    _load();
+                                  },
+                                )));
+                            _load();
+                          },
+                    icon: const Icon(Icons.map_outlined, size: 18, color: brand),
+                    label: Text(tr('Xarita', 'Карта'),
+                        style: const TextStyle(
+                            color: brand, fontWeight: FontWeight.w700)),
+                  ),
+                ]),
                 if (loading)
                   const Column(children: [
                     Shimmer(height: 64),

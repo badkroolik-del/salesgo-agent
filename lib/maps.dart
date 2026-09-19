@@ -182,6 +182,273 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   }
 }
 
+/// OPTIMAL MARSHRUT — bugungi mijozlar raqamli nuqta bo'lib, eng yaqin
+/// qo'shni (nearest-neighbor) tartibida yo'nalish chizig'i bilan bog'lanadi.
+class RouteMapScreen extends StatefulWidget {
+  final List clients; // bugungi marshrut mijozlari (lat/lng bilan)
+  final void Function(Map)? onOpen;
+  const RouteMapScreen({super.key, required this.clients, this.onOpen});
+  @override
+  State<RouteMapScreen> createState() => _RouteMapScreenState();
+}
+
+class _RouteMapScreenState extends State<RouteMapScreen> {
+  final _mc = MapController();
+  List<Map> ordered = [];
+  LatLng? myPos;
+  double totalKm = 0;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _build();
+  }
+
+  Future<void> _build() async {
+    // Agent joriy GPS (boshlanish nuqtasi sifatida)
+    try {
+      var p = await Geolocator.checkPermission();
+      if (p == LocationPermission.denied) {
+        p = await Geolocator.requestPermission();
+      }
+      final pos = await Geolocator.getCurrentPosition();
+      myPos = LatLng(pos.latitude, pos.longitude);
+    } catch (_) {}
+    _optimize();
+    if (mounted) setState(() => loading = false);
+    // Xaritani nuqtalarga moslash
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fit());
+  }
+
+  // Nearest-neighbor: har safar eng yaqin keyingi mijoz tanlanadi
+  void _optimize() {
+    const dist = Distance();
+    final pts = widget.clients
+        .where((c) => c['lat'] != null && c['lng'] != null)
+        .map((c) => Map<String, dynamic>.from(c))
+        .toList();
+    if (pts.isEmpty) {
+      ordered = [];
+      return;
+    }
+    final remaining = List<Map>.from(pts);
+    final result = <Map>[];
+    LatLng cur = myPos ??
+        LatLng(asNum(pts.first['lat']).toDouble(),
+            asNum(pts.first['lng']).toDouble());
+    double km = 0;
+    while (remaining.isNotEmpty) {
+      remaining.sort((a, b) {
+        final da = dist(cur,
+            LatLng(asNum(a['lat']).toDouble(), asNum(a['lng']).toDouble()));
+        final db = dist(cur,
+            LatLng(asNum(b['lat']).toDouble(), asNum(b['lng']).toDouble()));
+        return da.compareTo(db);
+      });
+      final next = remaining.removeAt(0);
+      final nextLL = LatLng(
+          asNum(next['lat']).toDouble(), asNum(next['lng']).toDouble());
+      km += dist(cur, nextLL) / 1000.0;
+      cur = nextLL;
+      result.add(next);
+    }
+    ordered = result;
+    totalKm = km;
+  }
+
+  void _fit() {
+    final pts = <LatLng>[
+      if (myPos != null) myPos!,
+      ...ordered.map((c) =>
+          LatLng(asNum(c['lat']).toDouble(), asNum(c['lng']).toDouble())),
+    ];
+    if (pts.length < 2) return;
+    try {
+      _mc.fitCamera(CameraFit.coordinates(
+          coordinates: pts, padding: const EdgeInsets.all(60)));
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final line = <LatLng>[
+      if (myPos != null) myPos!,
+      ...ordered.map((c) =>
+          LatLng(asNum(c['lat']).toDouble(), asNum(c['lng']).toDouble())),
+    ];
+    final center = line.isNotEmpty ? line.first : _tashkent;
+    return Scaffold(
+      body: Stack(children: [
+        FlutterMap(
+          mapController: _mc,
+          options: MapOptions(initialCenter: center, initialZoom: 12),
+          children: [
+            _osm(),
+            if (line.length >= 2)
+              PolylineLayer(polylines: [
+                Polyline(
+                    points: line,
+                    strokeWidth: 4,
+                    color: brand.withOpacity(0.85)),
+              ]),
+            // Agent joriy joyi
+            if (myPos != null)
+              MarkerLayer(markers: [
+                Marker(
+                  point: myPos!,
+                  width: 26,
+                  height: 26,
+                  child: Container(
+                    decoration: BoxDecoration(
+                        color: info,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: softShadow),
+                  ),
+                ),
+              ]),
+            // Raqamli mijoz nuqtalari
+            MarkerLayer(
+              markers: List.generate(ordered.length, (i) {
+                final c = ordered[i];
+                return Marker(
+                  point: LatLng(asNum(c['lat']).toDouble(),
+                      asNum(c['lng']).toDouble()),
+                  width: 34,
+                  height: 34,
+                  child: GestureDetector(
+                    onTap: () => _tap(c),
+                    child: Container(
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                          color: brandDark,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: softShadow),
+                      child: Text('${i + 1}',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 13)),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(children: [
+              CircleAvatar(
+                backgroundColor: Colors.white,
+                child: IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back, color: ink)),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: softShadow),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.route, color: brand, size: 16),
+                  const SizedBox(width: 5),
+                  Text(
+                      '${ordered.length} ${tr('nuqta', 'точек')} · ${totalKm.toStringAsFixed(1)} km',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, color: ink)),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+        if (loading)
+          const Center(child: CircularProgressIndicator(color: brand)),
+        Positioned(right: 14, bottom: 96, child: _ZoomButtons(mc: _mc)),
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 20,
+          child: GradientButton(
+            text: tr('Navigatsiyani ochish', 'Открыть навигацию'),
+            icon: Icons.navigation,
+            onTap: ordered.isEmpty
+                ? null
+                : () => openRoute(asNum(ordered.first['lat']).toDouble(),
+                    asNum(ordered.first['lng']).toDouble()),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  void _tap(Map c) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Row(children: [
+            Avatar('${c['name'] ?? '?'}'),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${c['name'] ?? ''}',
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w800)),
+                  Text('${c['address'] ?? '-'}',
+                      style: const TextStyle(color: muted, fontSize: 12.5)),
+                ],
+              ),
+            ),
+          ]),
+          const SizedBox(height: 16),
+          Row(children: [
+            if (widget.onOpen != null)
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    widget.onOpen!(c);
+                  },
+                  icon: const Icon(Icons.storefront),
+                  label: Text(tr('Kirish', 'Войти')),
+                  style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12)),
+                ),
+              ),
+            if (widget.onOpen != null) const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  openRoute(asNum(c['lat']).toDouble(),
+                      asNum(c['lng']).toDouble());
+                },
+                icon: const Icon(Icons.directions),
+                label: Text(tr('Yo‘l', 'Маршрут')),
+                style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12)),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
 /// Mijozlarni xaritada ko'rish. Marker AKB bo'yicha rangli.
 class ClientsMapScreen extends StatefulWidget {
   final List clients;
