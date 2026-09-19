@@ -39,14 +39,15 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       if (p == LocationPermission.denied) {
         p = await Geolocator.requestPermission();
       }
-      final pos = await Geolocator.getCurrentPosition(
-          locationSettings:
-              const LocationSettings(accuracy: LocationAccuracy.best));
+      final pos = await Geolocator.getCurrentPosition();
       final ll = LatLng(pos.latitude, pos.longitude);
       setState(() => picked = ll);
       _mc.move(ll, 16);
     } catch (_) {
-      if (mounted) snack(context, tr('GPS aniqlanmadi', 'GPS не определён'));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(tr('GPS aniqlanmadi', 'GPS не определён'))));
+      }
     } finally {
       if (mounted) setState(() => locating = false);
     }
