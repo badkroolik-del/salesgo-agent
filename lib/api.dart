@@ -51,9 +51,13 @@ class Api {
     return jsonDecode(utf8.decode(r.bodyBytes));
   }
 
-  static Future<dynamic> post(String path, Map<String, dynamic> body) async {
-    final r = await http.post(Uri.parse('$base$path'),
-        headers: _h, body: jsonEncode(body));
+  static Future<dynamic> post(String path, Map<String, dynamic> body,
+      {bool put = false}) async {
+    final uri = Uri.parse('$base$path');
+    final enc = jsonEncode(body);
+    final r = put
+        ? await http.put(uri, headers: _h, body: enc)
+        : await http.post(uri, headers: _h, body: enc);
     final j = r.body.isNotEmpty ? jsonDecode(utf8.decode(r.bodyBytes)) : {};
     if (r.statusCode == 401) throw 'auth';
     if (r.statusCode >= 400) throw (j['detail'] ?? 'Xato');
