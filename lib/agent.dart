@@ -57,9 +57,7 @@ class _AgentShellState extends State<AgentShell> {
 
   Future<void> _sendGps() async {
     try {
-      final pos = await Geolocator.getCurrentPosition(
-          locationSettings:
-              const LocationSettings(accuracy: LocationAccuracy.best));
+      final pos = await Geolocator.getCurrentPosition();
       await Api.post('/api/gps', {
         'points': [
           {
@@ -1659,9 +1657,7 @@ class _VisitScreenState extends State<VisitScreen> {
     try {
       Position? pos;
       try {
-        pos = await Geolocator.getCurrentPosition(
-            locationSettings:
-                const LocationSettings(accuracy: LocationAccuracy.best));
+        pos = await Geolocator.getCurrentPosition();
       } catch (_) {}
       if (pos != null && widget.client['lat'] != null) {
         distance = Geolocator.distanceBetween(
