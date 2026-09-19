@@ -78,7 +78,110 @@ class GradientHeader extends StatelessWidget {
   }
 }
 
-/// Animatsiyali "SalesGO" — blesk (shine) o'tadi, GO gradient. Ikonsiz.
+// ---- Animatsiyali radar logo ----
+class AnimatedLogo extends StatefulWidget {
+  final double size;
+  const AnimatedLogo({super.key, this.size = 96});
+  @override
+  State<AnimatedLogo> createState() => _AnimatedLogoState();
+}
+
+class _AnimatedLogoState extends State<AnimatedLogo>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 2400))
+    ..repeat();
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) => CustomPaint(painter: _LogoPainter(_c.value)),
+      ),
+    );
+  }
+}
+
+class _LogoPainter extends CustomPainter {
+  final double t;
+  _LogoPainter(this.t);
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final maxR = size.width / 2;
+    for (int i = 0; i < 3; i++) {
+      final p = (t + i / 3) % 1.0;
+      final r = maxR * (0.5 + p * 0.5);
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..color = Colors.white.withOpacity((1 - p) * 0.45);
+      canvas.drawCircle(c, r, paint);
+    }
+    final badgeR = maxR * 0.52;
+    final rect = Rect.fromCircle(center: c, radius: badgeR);
+    final badge = Paint()
+      ..shader = const LinearGradient(
+        colors: [Colors.white, Color(0xFFE6FFFB)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ).createShader(rect);
+    final rrect =
+        RRect.fromRectAndRadius(rect, Radius.circular(badgeR * 0.52));
+    canvas.drawRRect(rrect, badge);
+    final tp = TextPainter(
+      text: TextSpan(
+        text: 'S',
+        style: TextStyle(
+          color: brand,
+          fontSize: badgeR * 1.35,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, c - Offset(tp.width / 2, tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(covariant _LogoPainter old) => old.t != t;
+}
+
+class Wordmark extends StatelessWidget {
+  final double size;
+  final Color base;
+  const Wordmark({super.key, this.size = 26, this.base = ink});
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      fontSize: size,
+      fontWeight: FontWeight.w900,
+      letterSpacing: -0.5,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('Sales', style: style.copyWith(color: base)),
+        ShaderMask(
+          shaderCallback: (r) =>
+              goGradient.createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
+          child: Text('GO', style: style.copyWith(color: Colors.white)),
+        ),
+      ],
+    );
+  }
+}
+
+/// Animatsiyali "SalesGO" — "Sales" yaxlit rang, "GO" to'q sariq + yugurib
+/// o'tuvchi yorug'lik (shine). Saytdagi kabi. Ikonsiz.
 class AnimatedWordmark extends StatefulWidget {
   final double size;
   final Color base;
@@ -89,8 +192,10 @@ class AnimatedWordmark extends StatefulWidget {
 
 class _AnimatedWordmarkState extends State<AnimatedWordmark>
     with SingleTickerProviderStateMixin {
+  static const _orange = Color(0xFFF97316);
+  static const _amber = Color(0xFFFFC24B);
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 2600))
+      vsync: this, duration: const Duration(milliseconds: 2200))
     ..repeat();
   @override
   void dispose() {
@@ -98,34 +203,38 @@ class _AnimatedWordmarkState extends State<AnimatedWordmark>
     super.dispose();
   }
 
-  Widget _part(String txt, Color a, Color b, double t) {
-    return ShaderMask(
-      blendMode: BlendMode.srcIn,
-      shaderCallback: (r) => LinearGradient(
-        begin: Alignment(-1 + t * 3, 0),
-        end: Alignment(-0.4 + t * 3, 0),
-        colors: [a, Colors.white, b],
-      ).createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
-      child: Text(txt,
-          style: TextStyle(
-              fontSize: widget.size,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
-              color: Colors.white)),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) => Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _part('Sales', widget.base, widget.base, _c.value),
-          _part('GO', accent, accent2, _c.value),
-        ],
-      ),
+    final st = TextStyle(
+      fontSize: widget.size,
+      fontWeight: FontWeight.w900,
+      letterSpacing: -0.5,
+      height: 1.0,
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Sales — yaxlit rang
+        Text('Sales', style: st.copyWith(color: widget.base)),
+        // GO — doim to'q sariq, ustidan oq shine yuguradi
+        AnimatedBuilder(
+          animation: _c,
+          builder: (_, __) {
+            final t = _c.value;
+            return ShaderMask(
+              blendMode: BlendMode.srcIn,
+              shaderCallback: (r) => LinearGradient(
+                begin: Alignment(-1.0 + t * 2.4, 0),
+                end: Alignment(-0.2 + t * 2.4, 0),
+                colors: const [_orange, Colors.white, _amber, _orange],
+                stops: const [0.0, 0.45, 0.6, 1.0],
+                tileMode: TileMode.clamp,
+              ).createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
+              child: Text('GO', style: st.copyWith(color: Colors.white)),
+            );
+          },
+        ),
+      ],
     );
   }
 }
