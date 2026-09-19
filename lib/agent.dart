@@ -123,8 +123,11 @@ class DashboardTab extends StatefulWidget {
 
 class _DashboardTabState extends State<DashboardTab> {
   bool loading = true;
+  bool refreshing = false;
   num salesToday = 0, ordersToday = 0, routeToday = 0, debtors = 0;
   List recent = [];
+  List route = [];
+  Set doneIds = {};
 
   @override
   void initState() {
@@ -141,11 +144,41 @@ class _DashboardTabState extends State<DashboardTab> {
       final cl = (c['items'] ?? []) as List;
       salesToday = asNum(o['sum']);
       ordersToday = asNum(o['count'] ?? items.length);
-      routeToday = ((rt['items'] ?? []) as List).length;
+      route = (rt['items'] ?? []) as List;
+      routeToday = route.length;
       debtors = cl.where((x) => asNum(x['balance']) > 0).length;
       recent = items.take(6).toList();
+      doneIds = items.map((e) => e['client_id']).toSet();
+      _sortRoute(null);
     } catch (_) {}
     if (mounted) setState(() => loading = false);
+  }
+
+  void _sortRoute(Position? pos) {
+    double dist(x) {
+      if (pos == null || x['lat'] == null) return 1e12;
+      return Geolocator.distanceBetween(pos.latitude, pos.longitude,
+          asNum(x['lat']).toDouble(), asNum(x['lng']).toDouble());
+    }
+
+    route.sort((a, b) {
+      final da = doneIds.contains(a['id']) ? 1 : 0;
+      final db2 = doneIds.contains(b['id']) ? 1 : 0;
+      if (da != db2) return da - db2; // qilinmagalar tepada, qilinganlar pastda
+      if (pos != null) return dist(a).compareTo(dist(b));
+      return '${a['name']}'.compareTo('${b['name']}');
+    });
+  }
+
+  Future<void> _refresh() async {
+    setState(() => refreshing = true);
+    Position? pos;
+    try {
+      pos = await Geolocator.getCurrentPosition();
+    } catch (_) {}
+    await _load();
+    _sortRoute(pos);
+    if (mounted) setState(() => refreshing = false);
   }
 
   @override
@@ -164,9 +197,7 @@ class _DashboardTabState extends State<DashboardTab> {
               children: [
                 Row(
                   children: [
-                    const AnimatedLogo(size: 40),
-                    const SizedBox(width: 8),
-                    const Wordmark(size: 20, base: Colors.white),
+                    const AnimatedWordmark(size: 20, base: Colors.white),
                     const Spacer(),
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -240,31 +271,36 @@ class _DashboardTabState extends State<DashboardTab> {
                           icon: Icons.error_outline,
                           label: tr('Qarzdorlar', 'Должники'),
                           value: debtors,
-                          color: danger)),
+                          color: danger,
+                          onTap: () => Navigator.push(context,
+                              fadeRoute(const DebtorsScreen())))),
                 ]),
-                SectionTitle(tr('Tezkor amallar', 'Быстрые действия')),
-                Row(children: [
-                  _Quick(
-                      icon: Icons.route,
-                      label: tr('Marshrut', 'Маршрут'),
-                      color: brand,
-                      onTap: () => widget.onGoto(1)),
-                  _Quick(
-                      icon: Icons.receipt_long,
-                      label: tr('Zakazlar', 'Заказы'),
-                      color: info,
-                      onTap: () => widget.onGoto(2)),
-                  _Quick(
-                      icon: Icons.insert_chart,
-                      label: tr('Hisobot', 'Отчёт'),
-                      color: accent,
-                      onTap: () => widget.onGoto(3)),
-                  _Quick(
-                      icon: Icons.refresh,
-                      label: tr('Yangilash', 'Обновить'),
-                      color: violet,
-                      onTap: _load),
-                ]),
+                SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня'),
+                    trailing:
+                        _SyncButton(spinning: refreshing, onTap: _refresh)),
+                if (loading)
+                  const Column(children: [
+                    Shimmer(height: 64),
+                    SizedBox(height: 10),
+                    Shimmer(height: 64),
+                  ])
+                else if (route.isEmpty)
+                  Panel(
+                      child: EmptyState(
+                          text: tr('Bugun do‘kon yo‘q', 'Точек на сегодня нет')))
+                else
+                  ...route.map((c) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _RouteTile(
+                          c,
+                          done: doneIds.contains(c['id']),
+                          onTap: () async {
+                            await Navigator.push(context,
+                                fadeRoute(ClientCardScreen(client: c)));
+                            _load();
+                          },
+                        ),
+                      )),
                 SectionTitle(tr('So‘nggi zakazlar', 'Последние заказы'),
                     trailing: TextButton(
                         onPressed: () => widget.onGoto(2),
@@ -291,42 +327,199 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 }
 
-class _Quick extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color color;
+class _SyncButton extends StatefulWidget {
+  final bool spinning;
   final VoidCallback onTap;
-  const _Quick(
-      {required this.icon,
-      required this.label,
-      required this.color,
-      required this.onTap});
+  const _SyncButton({required this.spinning, required this.onTap});
+  @override
+  State<_SyncButton> createState() => _SyncButtonState();
+}
+
+class _SyncButtonState extends State<_SyncButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 800));
+  @override
+  void initState() {
+    super.initState();
+    if (widget.spinning) _c.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SyncButton old) {
+    super.didUpdateWidget(old);
+    if (widget.spinning && !_c.isAnimating) {
+      _c.repeat();
+    } else if (!widget.spinning && _c.isAnimating) {
+      _c.stop();
+      _c.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
+    return TextButton.icon(
+      onPressed: widget.spinning ? null : widget.onTap,
+      icon: RotationTransition(turns: _c, child: const Icon(Icons.sync, size: 18)),
+      label: Text(tr('Sinxron', 'Синхрон')),
+    );
+  }
+}
+
+class _RouteTile extends StatelessWidget {
+  final Map c;
+  final bool done;
+  final VoidCallback onTap;
+  const _RouteTile(this.c, {required this.done, required this.onTap});
+  @override
+  Widget build(BuildContext context) {
+    final bal = asNum(c['balance']);
+    return Panel(
+      padding: const EdgeInsets.all(12),
+      color: done ? const Color(0xFFF6FBF8) : Colors.white,
+      onTap: onTap,
+      child: Row(children: [
+        Avatar('${c['name'] ?? '?'}', size: 42),
+        const SizedBox(width: 12),
+        Expanded(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(16)),
-                child: Icon(icon, color: color, size: 24),
-              ),
-              const SizedBox(height: 6),
-              Text(label,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.w600, color: ink)),
+              Text('${c['name'] ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: done ? muted : ink,
+                      decoration:
+                          done ? TextDecoration.lineThrough : null)),
+              const SizedBox(height: 2),
+              Text('${c['address'] ?? c['territory_name'] ?? '-'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: muted, fontSize: 12.5)),
             ],
           ),
         ),
-      ),
+        const SizedBox(width: 8),
+        done
+            ? Pill(tr('Bajarildi', 'Готово'), color: ok, icon: Icons.check)
+            : (bal > 0
+                ? Pill(shortMoney(bal), color: danger, icon: Icons.trending_up)
+                : const Icon(Icons.chevron_right, color: muted)),
+      ]),
+    );
+  }
+}
+
+class DebtorsScreen extends StatefulWidget {
+  const DebtorsScreen({super.key});
+  @override
+  State<DebtorsScreen> createState() => _DebtorsScreenState();
+}
+
+class _DebtorsScreenState extends State<DebtorsScreen> {
+  List items = [];
+  bool loading = true;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final d = await Api.get('/api/clients?limit=500');
+      items = ((d['items'] ?? []) as List)
+          .where((c) => asNum(c['balance']) > 0)
+          .toList()
+        ..sort((a, b) => asNum(b['balance']).compareTo(asNum(a['balance'])));
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = items.fold<num>(0, (a, c) => a + asNum(c['balance']));
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          padding: const EdgeInsets.fromLTRB(8, 4, 18, 20),
+          child: Row(children: [
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back, color: Colors.white)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(tr('Qarzdorlar', 'Должники'),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800)),
+                  Text('${items.length} · ${money(total)}',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                ],
+              ),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : items.isEmpty
+                  ? EmptyState(
+                      icon: Icons.check_circle_outline,
+                      text: tr('Qarzdor yo‘q', 'Должников нет'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final c = items[i];
+                        return Panel(
+                          padding: const EdgeInsets.all(12),
+                          onTap: () => Navigator.push(context,
+                              fadeRoute(ClientCardScreen(client: c))),
+                          child: Row(children: [
+                            Avatar('${c['name'] ?? '?'}'),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('${c['name'] ?? ''}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: ink)),
+                                  Text('${c['address'] ?? '-'}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: muted, fontSize: 12.5)),
+                                ],
+                              ),
+                            ),
+                            Text(money(asNum(c['balance'])),
+                                style: const TextStyle(
+                                    color: danger,
+                                    fontWeight: FontWeight.w800)),
+                          ]),
+                        );
+                      },
+                    ),
+        ),
+      ]),
     );
   }
 }
@@ -436,7 +629,7 @@ class _ClientsTabState extends State<ClientsTab> {
   List all = [];
   bool loading = true;
   String q = '';
-  String filter = 'all'; // all/debt/akb
+  String filter = 'all'; // all/debt/akb/okb
   int day = 0; // 0 = hammasi, 1..7 = weekday
 
   @override
@@ -462,7 +655,8 @@ class _ClientsTabState extends State<ClientsTab> {
       final name = '${c['name'] ?? ''}'.toLowerCase();
       if (q.isNotEmpty && !name.contains(q.toLowerCase())) return false;
       if (filter == 'debt' && asNum(c['balance']) <= 0) return false;
-      if (filter == 'akb' && asNum(c['is_akb']) != 1) return false;
+      if (filter == 'akb' && asNum(c['orders_month']) <= 0) return false;
+      if (filter == 'okb' && asNum(c['orders_month']) > 0) return false;
       return true;
     }).toList();
   }
@@ -497,8 +691,12 @@ class _ClientsTabState extends State<ClientsTab> {
                             fontWeight: FontWeight.w800)),
                     const Spacer(),
                     IconButton(
-                      onPressed: () => Navigator.push(context,
-                          fadeRoute(ClientsMapScreen(clients: all))),
+                      onPressed: () => Navigator.push(
+                          context,
+                          fadeRoute(ClientsMapScreen(
+                              clients: all,
+                              onOpen: (c) => Navigator.push(context,
+                                  fadeRoute(ClientCardScreen(client: c)))))),
                       icon: const Icon(Icons.map, color: Colors.white),
                       tooltip: tr('Xarita', 'Карта'),
                     ),
@@ -533,6 +731,7 @@ class _ClientsTabState extends State<ClientsTab> {
               _fChip(tr('Barchasi', 'Все'), 'all'),
               _fChip(tr('Qarzli', 'Должники'), 'debt'),
               _fChip('AKB', 'akb'),
+              _fChip('OKB', 'okb'),
               const Spacer(),
               Text('${list.length}',
                   style: const TextStyle(
@@ -646,10 +845,14 @@ class _ClientsTabState extends State<ClientsTab> {
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          bal > 0
-              ? Pill(shortMoney(bal), color: danger, icon: Icons.trending_up)
-              : Pill(tr('Toza', 'Чисто'), color: ok, icon: Icons.check),
+          if (asNum(c['orders_month']) > 0) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.verified, color: ok, size: 18),
+          ],
+          if (bal > 0) ...[
+            const SizedBox(width: 8),
+            Pill(shortMoney(bal), color: danger, icon: Icons.trending_up),
+          ],
         ],
       ),
     );
@@ -786,6 +989,8 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                     _row(Icons.place, tr('Manzil', 'Адрес'),
                         '${c['address'] ?? c['territory_name'] ?? '-'}'),
                     const Divider(height: 20),
+                    _row(Icons.near_me, tr('Orientir', 'Ориентир'), '${c['orientir'] ?? '-'}'),
+                    const Divider(height: 20),
                     _row(Icons.badge, 'INN', '${c['inn'] ?? '-'}'),
                     const Divider(height: 20),
                     _row(Icons.map, tr('Koordinata', 'Координаты'),
@@ -853,6 +1058,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   final phone = TextEditingController();
   final inn = TextEditingController();
   final address = TextEditingController();
+  final orientir = TextEditingController();
   final Set<int> days = {};
   bool akb = false;
   double? lat, lng;
@@ -871,6 +1077,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       phone.text = '${c['phone'] ?? ''}';
       inn.text = '${c['inn'] ?? ''}';
       address.text = '${c['address'] ?? ''}';
+      orientir.text = '${c['orientir'] ?? ''}';
       akb = asNum(c['is_akb']) == 1;
       if (c['lat'] != null) lat = asNum(c['lat']).toDouble();
       if (c['lng'] != null) lng = asNum(c['lng']).toDouble();
@@ -914,6 +1121,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       'phone': phone.text.trim(),
       'inn': inn.text.trim(),
       'address': address.text.trim(),
+      'orientir': orientir.text.trim(),
       'lat': lat,
       'lng': lng,
       'territory_id': territoryId,
@@ -970,6 +1178,8 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                 _tf(inn, 'INN', Icons.badge, kb: TextInputType.number),
                 const SizedBox(height: 12),
                 _tf(address, tr('Manzil', 'Адрес'), Icons.place),
+                const SizedBox(height: 12),
+                _tf(orientir, tr('Orientir', 'Ориентир'), Icons.near_me),
                 const SizedBox(height: 16),
                 Text(tr('Tashrif kunlari', 'Дни визитов'),
                     style: const TextStyle(
@@ -1037,16 +1247,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                         color: lat != null ? ok : muted),
                   ]),
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  value: akb,
-                  onChanged: (v) => setState(() => akb = v),
-                  activeColor: brand,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(tr('AKB (faol baza)', 'АКБ (активная база)'),
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
-                ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 GradientButton(
                   text: tr('Saqlash', 'Сохранить'),
                   icon: Icons.check,
@@ -1117,16 +1318,6 @@ class _OrdersTabState extends State<OrdersTab> {
     if (mounted) setState(() => loading = false);
   }
 
-  Future<void> _setStatus(Map o, String st) async {
-    try {
-      await Api.post('/api/orders/${o['id']}/status?status=$st', {});
-      if (mounted) Navigator.pop(context);
-      _load();
-    } catch (e) {
-      if (mounted) snack(context, '$e');
-    }
-  }
-
   void _openOrder(Map o) {
     final st = '${o['status'] ?? 'new'}';
     showModalBottomSheet(
@@ -1154,37 +1345,6 @@ class _OrdersTabState extends State<OrdersTab> {
             Text(money(asNum(o['total'])),
                 style: const TextStyle(
                     fontSize: 20, fontWeight: FontWeight.w900, color: brand)),
-            const SizedBox(height: 18),
-            if (st != 'canceled' && st != 'returned') ...[
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _setStatus(o, 'returned'),
-                    icon: const Icon(Icons.assignment_return, color: violet),
-                    label: Text(tr('Vozvrat', 'Возврат'),
-                        style: const TextStyle(color: violet)),
-                    style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: violet),
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _setStatus(o, 'canceled'),
-                    icon: const Icon(Icons.cancel, color: danger),
-                    label: Text(tr('Otmen', 'Отмена'),
-                        style: const TextStyle(color: danger)),
-                    style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: danger),
-                        padding: const EdgeInsets.symmetric(vertical: 14)),
-                  ),
-                ),
-              ]),
-            ] else
-              Text(tr('Bu zakaz yopilgan', 'Этот заказ закрыт'),
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: muted)),
             const SizedBox(height: 8),
           ],
         ),
@@ -1254,13 +1414,13 @@ class _OrdersTabState extends State<OrdersTab> {
           setState(() => status = val);
           _load();
         },
-        selectedColor: Colors.white,
+        selectedColor: brand,
         labelStyle: TextStyle(
-            color: sel ? brandDark : Colors.white,
+            color: sel ? Colors.white : brandDark,
             fontWeight: FontWeight.w700,
             fontSize: 13),
-        backgroundColor: Colors.white.withOpacity(0.18),
-        side: BorderSide(color: Colors.white.withOpacity(0.4)),
+        backgroundColor: Colors.white,
+        side: BorderSide(color: sel ? brand : line),
       ),
     );
   }
@@ -1278,6 +1438,7 @@ class _AgentReportsTabState extends State<AgentReportsTab> {
   num sum = 0, count = 0;
   Map<String, num> byPay = {'cash': 0, 'transfer': 0, 'debt': 0};
   List recent = [];
+  Map kpi = {};
 
   @override
   void initState() {
@@ -1299,6 +1460,9 @@ class _AgentReportsTabState extends State<AgentReportsTab> {
         byPay[p] = (byPay[p] ?? 0) + asNum(o['total']);
       }
       recent = items.take(8).toList();
+      try {
+        kpi = Map<String, dynamic>.from(await Api.get('/api/my-kpi'));
+      } catch (_) {}
     } catch (_) {}
     if (mounted) setState(() => loading = false);
   }
@@ -1358,6 +1522,29 @@ class _AgentReportsTabState extends State<AgentReportsTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(children: [
+                  Expanded(
+                      child: StatCard(
+                          icon: Icons.verified,
+                          label: 'AKB',
+                          value: asNum(kpi['akb']),
+                          color: ok)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                      child: StatCard(
+                          icon: Icons.store_mall_directory_outlined,
+                          label: 'OKB',
+                          value: asNum(kpi['okb']),
+                          color: warn)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                      child: StatCard(
+                          icon: Icons.place,
+                          label: tr('Tashrif', 'Визиты'),
+                          value: asNum(kpi['visits']),
+                          color: info)),
+                ]),
+                const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
                       child: StatCard(
@@ -1577,7 +1764,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 },
               ),
               const SizedBox(height: 14),
-              const Text('SalesGO v1.2',
+              const Text('SalesGO v1.3',
                   style: TextStyle(color: muted, fontSize: 12)),
             ],
           ),
@@ -1682,7 +1869,6 @@ class _VisitScreenState extends State<VisitScreen> {
   }
 
   Future<void> _photo() async {
-    // Kamera rasmi ilova keshiga tushadi, telefon galereyasiga saqlanmaydi.
     final x = await ImagePicker().pickImage(
         source: ImageSource.camera, imageQuality: 60, requestFullMetadata: false);
     if (x == null) return;
@@ -1892,7 +2078,7 @@ class OrderScreen extends StatefulWidget {
 
 class _OrderScreenState extends State<OrderScreen> {
   List products = [];
-  final Map<int, Map> cart = {}; // id -> {product, qty(dona)}
+  final Map<int, Map> cart = {};
   bool loading = true;
   String q = '';
   String cat = '';
