@@ -47,6 +47,14 @@ jobs:
           )
           if "ACCESS_FINE_LOCATION" not in s:
               s = re.sub(r"(<manifest[^>]*>)", lambda m: m.group(1) + "\n" + perms, s, count=1)
+          queries = (
+            '  <queries>\n'
+            '    <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>\n'
+            '    <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="geo"/></intent>\n'
+            '  </queries>\n'
+          )
+          if "<queries>" not in s:
+              s = re.sub(r"(<manifest[^>]*>)", lambda m: m.group(1) + "\n" + queries, s, count=1)
           s = s.replace('android:label="salesgo_agent"', 'android:label="SalesGO"')
           open(p, "w", encoding="utf-8").write(s)
           print("manifest patched")
@@ -100,7 +108,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.${{ github.run_number }}
+          tag_name: v1.3.${{ github.run_number }}
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
