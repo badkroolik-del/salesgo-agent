@@ -1,7 +1,7 @@
 name: salesgo_agent
 description: SalesGO agent mobil ilova
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.1.0 <4.0.0'
@@ -20,3 +20,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+# Launcher ikon (build vaqtida tools/make_icon.py yasaydi)
+flutter_launcher_icons:
+  android: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#0F766E"
+  adaptive_icon_foreground: "assets/icon/foreground.png"
+  min_sdk_android: 21
