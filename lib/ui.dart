@@ -78,18 +78,19 @@ class GradientHeader extends StatelessWidget {
   }
 }
 
-// ---- Animatsiyali radar logo ----
-class AnimatedLogo extends StatefulWidget {
+/// Animatsiyali "SalesGO" — blesk (shine) o'tadi, GO gradient. Ikonsiz.
+class AnimatedWordmark extends StatefulWidget {
   final double size;
-  const AnimatedLogo({super.key, this.size = 96});
+  final Color base;
+  const AnimatedWordmark({super.key, this.size = 30, this.base = ink});
   @override
-  State<AnimatedLogo> createState() => _AnimatedLogoState();
+  State<AnimatedWordmark> createState() => _AnimatedWordmarkState();
 }
 
-class _AnimatedLogoState extends State<AnimatedLogo>
+class _AnimatedWordmarkState extends State<AnimatedWordmark>
     with SingleTickerProviderStateMixin {
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 2400))
+      vsync: this, duration: const Duration(milliseconds: 2600))
     ..repeat();
   @override
   void dispose() {
@@ -97,85 +98,34 @@ class _AnimatedLogoState extends State<AnimatedLogo>
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: widget.size,
-      height: widget.size,
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (_, __) => CustomPaint(painter: _LogoPainter(_c.value)),
-      ),
+  Widget _part(String txt, Color a, Color b, double t) {
+    return ShaderMask(
+      blendMode: BlendMode.srcIn,
+      shaderCallback: (r) => LinearGradient(
+        begin: Alignment(-1 + t * 3, 0),
+        end: Alignment(-0.4 + t * 3, 0),
+        colors: [a, Colors.white, b],
+      ).createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
+      child: Text(txt,
+          style: TextStyle(
+              fontSize: widget.size,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+              color: Colors.white)),
     );
   }
-}
 
-class _LogoPainter extends CustomPainter {
-  final double t;
-  _LogoPainter(this.t);
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = Offset(size.width / 2, size.height / 2);
-    final maxR = size.width / 2;
-    for (int i = 0; i < 3; i++) {
-      final p = (t + i / 3) % 1.0;
-      final r = maxR * (0.5 + p * 0.5);
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = Colors.white.withOpacity((1 - p) * 0.45);
-      canvas.drawCircle(c, r, paint);
-    }
-    final badgeR = maxR * 0.52;
-    final rect = Rect.fromCircle(center: c, radius: badgeR);
-    final badge = Paint()
-      ..shader = const LinearGradient(
-        colors: [Colors.white, Color(0xFFE6FFFB)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ).createShader(rect);
-    final rrect =
-        RRect.fromRectAndRadius(rect, Radius.circular(badgeR * 0.52));
-    canvas.drawRRect(rrect, badge);
-    final tp = TextPainter(
-      text: TextSpan(
-        text: 'S',
-        style: TextStyle(
-          color: brand,
-          fontSize: badgeR * 1.35,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, c - Offset(tp.width / 2, tp.height / 2));
-  }
-
-  @override
-  bool shouldRepaint(covariant _LogoPainter old) => old.t != t;
-}
-
-class Wordmark extends StatelessWidget {
-  final double size;
-  final Color base;
-  const Wordmark({super.key, this.size = 26, this.base = ink});
   @override
   Widget build(BuildContext context) {
-    final style = TextStyle(
-      fontSize: size,
-      fontWeight: FontWeight.w900,
-      letterSpacing: -0.5,
-    );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('Sales', style: style.copyWith(color: base)),
-        ShaderMask(
-          shaderCallback: (r) =>
-              goGradient.createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
-          child: Text('GO', style: style.copyWith(color: Colors.white)),
-        ),
-      ],
+    return AnimatedBuilder(
+      animation: _c,
+      builder: (_, __) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _part('Sales', widget.base, widget.base, _c.value),
+          _part('GO', accent, accent2, _c.value),
+        ],
+      ),
     );
   }
 }
@@ -247,6 +197,7 @@ class StatCard extends StatelessWidget {
   final num value;
   final bool isMoney;
   final Color color;
+  final VoidCallback? onTap;
   const StatCard({
     super.key,
     required this.icon,
@@ -254,11 +205,13 @@ class StatCard extends StatelessWidget {
     required this.value,
     this.isMoney = false,
     this.color = brand,
+    this.onTap,
   });
   @override
   Widget build(BuildContext context) {
     return Panel(
       padding: const EdgeInsets.all(14),
+      onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
