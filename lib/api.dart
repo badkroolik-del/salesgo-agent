@@ -64,6 +64,14 @@ class Api {
     return j;
   }
 
+  static Future<dynamic> delete(String path) async {
+    final r = await http.delete(Uri.parse('$base$path'), headers: _h);
+    final j = r.body.isNotEmpty ? jsonDecode(utf8.decode(r.bodyBytes)) : {};
+    if (r.statusCode == 401) throw 'auth';
+    if (r.statusCode >= 400) throw (j['detail'] ?? 'Xato');
+    return j;
+  }
+
   /// Rasm yuklash -> URL qaytaradi.
   static Future<String> uploadPhoto(File file) async {
     final req = http.MultipartRequest('POST', Uri.parse('$base/api/upload'));
