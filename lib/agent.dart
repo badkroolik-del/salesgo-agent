@@ -2198,6 +2198,26 @@ class _NakladnoyScreenState extends State<NakladnoyScreen> {
     }
   }
 
+  // Zakazni tahrirlash (K2) — mahsulotlarni o'zgartirish uchun OrderScreen ochiladi
+  Future<void> _openEdit() async {
+    final client = {
+      'id': order['client_id'],
+      'name': widget.clientName,
+    };
+    final vid = asNum(order['visit_id']).toInt();
+    final okr = await Navigator.push<Map>(
+      context,
+      fadeRoute(OrderScreen(
+        client: client,
+        visitId: vid > 0 ? vid : -1,
+        existing: order,
+      )),
+    );
+    if (okr != null && okr['ok'] == true && mounted) {
+      Navigator.pop(context, true); // yangilandi — ro'yxat yangilanadi
+    }
+  }
+
   Future<void> _finalize(String action) async {
     try {
       await Api.post(
@@ -2293,6 +2313,12 @@ class _NakladnoyScreenState extends State<NakladnoyScreen> {
                   ],
                 ),
               ),
+              // Tahrirlash — faqat chernovik yoki yangi zakaz (K2)
+              if (!loading && (st == 'draft' || st == 'new'))
+                IconButton(
+                    tooltip: tr('Tahrirlash', 'Изменить'),
+                    onPressed: _openEdit,
+                    icon: const Icon(Icons.edit, color: Colors.white)),
               if (st.isNotEmpty)
                 Pill(statusLabel(st), color: Colors.white),
             ]),
@@ -3730,6 +3756,8 @@ class _VisitScreenState extends State<VisitScreen> {
   int beforeCount = 0, afterCount = 0;
   List equipment = [];
   final comment = TextEditingController();
+  // "Sizning amallaringiz" faoli (K4): zakaz/foto ... + sinxron holati
+  final List<Map> visitActions = [];
 
   @override
   void initState() {
@@ -3873,6 +3901,12 @@ class _VisitScreenState extends State<VisitScreen> {
         } else {
           afterCount++;
         }
+        visitActions.add({
+          'type': 'photo',
+          'sub': type == 'before' ? 'До' : 'После',
+          'synced': okSent,
+          'time': DateTime.now(),
+        });
       });
       snack(
           context,
@@ -3881,6 +3915,75 @@ class _VisitScreenState extends State<VisitScreen> {
               : tr('Foto navbatga saqlandi (sinxron qiling)',
                   'Фото в очереди (синхронизируйте)'));
     }
+  }
+
+  // "Sizning amallaringiz" faoli (K4) — 1 ptichka=yuborilmagan, 2=sinxron
+  Widget _actionsFeed() {
+    if (visitActions.isEmpty) return const SizedBox.shrink();
+    IconData ic(String t) => t == 'photo'
+        ? Icons.photo_camera_outlined
+        : (t == 'draft' ? Icons.bookmark_outline : Icons.receipt_long);
+    String label(Map a) {
+      switch ('${a['type']}') {
+        case 'photo':
+          return '${tr('Foto-otchyot', 'Фото-отчёт')} · ${a['sub'] ?? ''}';
+        case 'draft':
+          return tr('Zakaz (chernovik)', 'Заказ (черновик)');
+        default:
+          return tr('Zakaz', 'Заказ');
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 18),
+        Text(tr('Sizning amallaringiz', 'Ваши действия'),
+            style: const TextStyle(fontWeight: FontWeight.w800, color: ink)),
+        const SizedBox(height: 8),
+        ...visitActions.reversed.map((a) {
+          final synced = a['synced'] == true;
+          final t = DateTime.tryParse('${a['time']}') ?? DateTime.now();
+          final hm =
+              '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Panel(
+              padding: const EdgeInsets.all(12),
+              child: Row(children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                      color: brand.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Icon(ic('${a['type']}'), color: brand, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${label(a)}  ·  $hm',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 13)),
+                      if (a['total'] != null && asNum(a['total']) > 0)
+                        Text(money(asNum(a['total'])),
+                            style: const TextStyle(
+                                color: muted, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                // 1 ptichka (kulrang) = yuborilmagan, 2 ptichka (yashil) = sinxron
+                Icon(synced ? Icons.done_all : Icons.check,
+                    size: 20, color: synced ? ok : muted),
+              ]),
+            ),
+          );
+        }),
+      ],
+    );
   }
 
   Future<void> _checkout() async {
@@ -4023,11 +4126,21 @@ class _VisitScreenState extends State<VisitScreen> {
                         sub: tr('Mahsulot tanlab savat yaratish',
                             'Выбрать товары в корзину'),
                         onTap: () async {
-                          final okr = await Navigator.push<bool>(
+                          final okr = await Navigator.push<Map>(
                               context,
                               fadeRoute(OrderScreen(
                                   client: widget.client, visitId: visitId!)));
-                          if (okr == true) setState(() => result = 'order');
+                          if (okr != null && okr['ok'] == true) {
+                            setState(() {
+                              result = 'order';
+                              visitActions.add({
+                                'type': okr['type'] ?? 'order',
+                                'total': okr['total'] ?? 0,
+                                'synced': okr['synced'] ?? false,
+                                'time': DateTime.now(),
+                              });
+                            });
+                          }
                         },
                       ),
                       const SizedBox(height: 18),
@@ -4069,6 +4182,8 @@ class _VisitScreenState extends State<VisitScreen> {
                             ),
                           ]),
                         ),
+                      // Sizning amallaringiz (K4)
+                      _actionsFeed(),
                       const SizedBox(height: 20),
                       Text(tr('Tashrif natijasi', 'Результат визита'),
                           style: const TextStyle(
@@ -4301,7 +4416,12 @@ class _PromosScreenState extends State<PromosScreen> {
 class OrderScreen extends StatefulWidget {
   final Map client;
   final int visitId;
-  const OrderScreen({super.key, required this.client, required this.visitId});
+  final Map? existing; // tahrirlash: mavjud zakaz {id, items:[...], pay_type, comment}
+  const OrderScreen(
+      {super.key,
+      required this.client,
+      required this.visitId,
+      this.existing});
   @override
   State<OrderScreen> createState() => _OrderScreenState();
 }
@@ -4345,6 +4465,17 @@ class _OrderScreenState extends State<OrderScreen> {
         }
       }
     } catch (_) {}
+    // Tahrirlash: mavjud zakaz elementlarini savatga yuklaymiz
+    if (widget.existing != null) {
+      _orderComment.text = '${widget.existing!['comment'] ?? ''}';
+      for (final it in (widget.existing!['items'] ?? [])) {
+        final pid = it['product_id'];
+        final p = products.firstWhere((x) => x['id'] == pid,
+            orElse: () => null);
+        final qd = asNum(it['qty']).toInt();
+        if (p != null && qd > 0) cart[pid as int] = {'product': p, 'qty': qd};
+      }
+    }
     if (mounted) setState(() => loading = false);
   }
 
@@ -5094,6 +5225,20 @@ class _OrderScreenState extends State<OrderScreen> {
             }),
       ],
     };
+    // Tahrirlash rejimi: mavjud zakazni PUT bilan yangilaymiz (navbatga emas)
+    if (widget.existing != null) {
+      try {
+        await Api.post('/api/orders/${widget.existing!['id']}', body, put: true);
+        if (mounted) {
+          Navigator.pop(context); // sheet
+          snack(context, tr('Zakaz yangilandi', 'Заказ обновлён'));
+          Navigator.pop(context, {'ok': true, 'type': 'edit'});
+        }
+      } catch (e) {
+        if (mounted) snack(context, '$e');
+      }
+      return;
+    }
     final sent = await SyncStore.sendOrQueueOrder(body);
     if (mounted) {
       Navigator.pop(context); // sheet
@@ -5105,7 +5250,13 @@ class _OrderScreenState extends State<OrderScreen> {
                   : tr('Zakaz saqlandi', 'Заказ сохранён'))
               : tr('Zakaz navbatga saqlandi (sinxron qiling)',
                   'Заказ в очереди (синхронизируйте)'));
-      Navigator.pop(context, true); // order screen
+      // Amallar faoli uchun natija (K4)
+      Navigator.pop(context, {
+        'ok': true,
+        'type': draft ? 'draft' : 'order',
+        'total': total,
+        'synced': sent,
+      });
     }
   }
 }
