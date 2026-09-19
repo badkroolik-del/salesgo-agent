@@ -1093,60 +1093,104 @@ class OrderTile extends StatelessWidget {
   final VoidCallback? onTap;
   final bool history; // mijoz tarixida: sana + receipt ikon (client_name yo'q)
   const OrderTile(this.o, {super.key, this.onTap, this.history = false});
+  IconData _payIcon(String p) => p == 'debt'
+      ? Icons.schedule
+      : (p == 'transfer' ? Icons.swap_horiz : Icons.payments_outlined);
+
   @override
   Widget build(BuildContext context) {
     final status = '${o['status'] ?? 'new'}';
+    final sc = statusColor(status);
+    final pay = '${o['pay_type'] ?? 'cash'}';
     final dateRaw = '${o['created_at'] ?? o['delivery_date'] ?? ''}';
     final date = dateRaw.length >= 10 ? dateRaw.substring(0, 10) : dateRaw;
-    final title =
-        history ? (date.isNotEmpty ? date : '#${o['id']}') : '${o['client_name'] ?? tr('Mijoz', 'Клиент')}';
+    final time =
+        dateRaw.length >= 16 ? dateRaw.substring(11, 16) : ''; // HH:MM
+    final title = history
+        ? (date.isNotEmpty ? date : '#${o['id']}')
+        : '${o['client_name'] ?? tr('Mijoz', 'Клиент')}';
+    final itemsN = (o['items'] is List) ? (o['items'] as List).length : null;
     return Panel(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.zero,
       onTap: onTap,
-      child: Row(
-        children: [
-          history
-              ? Container(
-                  width: 42,
-                  height: 42,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                      color: statusColor(status).withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Icon(Icons.receipt_long,
-                      color: statusColor(status), size: 20),
-                )
-              : Avatar('${o['client_name'] ?? '?'}', size: 42),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, color: ink)),
-                const SizedBox(height: 2),
-                Text(
-                    history
-                        ? '#${o['id']} · ${payLabel('${o['pay_type']}')}'
-                        : '#${o['id']} · ${payLabel('${o['pay_type']}')}',
-                    style: const TextStyle(color: muted, fontSize: 12)),
-              ],
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Chap rangli holat aksenti
+            Container(
+                width: 5,
+                decoration: BoxDecoration(
+                    color: sc,
+                    borderRadius: const BorderRadius.horizontal(
+                        left: Radius.circular(16)))),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                child: Row(children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                        color: sc.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Icon(Icons.receipt_long, color: sc, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Expanded(
+                            child: Text(title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: ink,
+                                    fontSize: 14.5)),
+                          ),
+                          const SizedBox(width: 6),
+                          Pill(statusLabel(status), color: sc),
+                        ]),
+                        const SizedBox(height: 5),
+                        Row(children: [
+                          Icon(_payIcon(pay), size: 13, color: muted),
+                          const SizedBox(width: 4),
+                          Text(payLabel(pay),
+                              style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600)),
+                          Text('  ·  #${o['id']}',
+                              style:
+                                  const TextStyle(color: muted, fontSize: 12)),
+                          if (time.isNotEmpty)
+                            Text('  ·  $time',
+                                style: const TextStyle(
+                                    color: muted, fontSize: 12)),
+                          const Spacer(),
+                          if (itemsN != null)
+                            Text('$itemsN ${tr('tovar', 'тов.')}',
+                                style: const TextStyle(
+                                    color: muted, fontSize: 11.5)),
+                        ]),
+                        const SizedBox(height: 6),
+                        Text(money(asNum(o['total'])),
+                            style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: brandDark,
+                                fontSize: 16)),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(money(asNum(o['total'])),
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w800, color: ink)),
-              const SizedBox(height: 4),
-              Pill(statusLabel(status), color: statusColor(status)),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
