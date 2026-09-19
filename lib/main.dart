@@ -310,6 +310,26 @@ class _LoginScreenState extends State<LoginScreen> {
                           busy: busy,
                           onTap: _login,
                         ),
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: busy
+                              ? null
+                              : () {
+                                  comp.text = 'demo';
+                                  login.text = 'vali';
+                                  pass.text = 'demo123';
+                                  _login();
+                                },
+                          icon: const Icon(Icons.play_circle_outline,
+                              color: brand),
+                          label: Text(
+                              tr('Demo (sinov) kirish', 'Демо (тест) вход'),
+                              style: const TextStyle(
+                                  color: brand, fontWeight: FontWeight.w700)),
+                          style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              side: const BorderSide(color: brand)),
+                        ),
                         const SizedBox(height: 12),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
