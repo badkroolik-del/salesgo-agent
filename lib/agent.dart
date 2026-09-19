@@ -10,6 +10,7 @@ import 'ui.dart';
 import 'maps.dart';
 import 'main.dart';
 import 'sync.dart';
+import 'share_util.dart';
 
 String _today() => DateTime.now().toIso8601String().substring(0, 10);
 
@@ -192,7 +193,7 @@ class _DashboardTabState extends State<DashboardTab> {
     final name = '${Api.me?['name'] ?? 'Agent'}';
     return RefreshIndicator(
       color: brand,
-      onRefresh: _load,
+      onRefresh: _refresh,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.zero,
@@ -282,7 +283,7 @@ class _DashboardTabState extends State<DashboardTab> {
                               fadeRoute(const DebtorsScreen())))),
                 ]),
                 const SizedBox(height: 16),
-                // KATTA sinxron tugmasi — uzun bosilsa server bilan sinxron
+                // KATTA sinxron tugmasi — bosilsa server bilan sinxron
                 _BigSyncButton(onDone: _load),
                 if (drafts.isNotEmpty) ...[
                   SectionTitle(tr('Chernovik zakazlar', 'Черновики заказов')),
@@ -291,9 +292,7 @@ class _DashboardTabState extends State<DashboardTab> {
                         child: OrderTile(o),
                       )),
                 ],
-                SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня'),
-                    trailing:
-                        _SyncButton(spinning: refreshing, onTap: _refresh)),
+                SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня')),
                 if (loading)
                   const Column(children: [
                     Shimmer(height: 64),
@@ -327,7 +326,7 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 }
 
-// KATTA sinxron tugmasi: uzun bosilganda navbatdagi zakaz/rasmlarni serverga
+// KATTA sinxron tugmasi: bosilganda navbatdagi zakaz/rasmlarni serverga
 // yuboradi va jarayonni (nechta zakaz / nechta rasm) ko'rsatadi.
 class _BigSyncButton extends StatefulWidget {
   final Future<void> Function() onDone;
@@ -418,16 +417,7 @@ class _BigSyncButtonState extends State<_BigSyncButton>
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPress: _startSync,
-      onTap: () {
-        if (!syncing) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(tr('Sinxron uchun tugmani bosib turing',
-                'Удерживайте кнопку для синхронизации')),
-            duration: const Duration(seconds: 2),
-          ));
-        }
-      },
+      onTap: _startSync,
       child: Container(
         height: 64,
         width: double.infinity,
@@ -472,69 +462,19 @@ class _BigSyncButtonState extends State<_BigSyncButton>
                     mainAxisAlignment: MainAxisAlignment.center,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(tr('Sinxronlash', 'Синхронизация'),
+                      Text(
+                          pending > 0
+                              ? '${tr('Sinxronlash', 'Синхронизация')}  ·  $pending'
+                              : tr('Sinxronlash', 'Синхронизация'),
                           style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
                               fontSize: 16.5)),
-                      Text(
-                          pending > 0
-                              ? '${tr('Kutilmoqda', 'Ожидает')}: $pending · ${tr('bosib turing', 'удерживайте')}'
-                              : tr('serverga yuborish · bosib turing',
-                                  'отправить · удерживайте'),
-                          style: TextStyle(
-                              color: Colors.white.withOpacity(0.85),
-                              fontSize: 11.5)),
                     ],
                   ),
                 ],
               ),
       ),
-    );
-  }
-}
-
-class _SyncButton extends StatefulWidget {
-  final bool spinning;
-  final VoidCallback onTap;
-  const _SyncButton({required this.spinning, required this.onTap});
-  @override
-  State<_SyncButton> createState() => _SyncButtonState();
-}
-
-class _SyncButtonState extends State<_SyncButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 800));
-  @override
-  void initState() {
-    super.initState();
-    if (widget.spinning) _c.repeat();
-  }
-
-  @override
-  void didUpdateWidget(covariant _SyncButton old) {
-    super.didUpdateWidget(old);
-    if (widget.spinning && !_c.isAnimating) {
-      _c.repeat();
-    } else if (!widget.spinning && _c.isAnimating) {
-      _c.stop();
-      _c.value = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton.icon(
-      onPressed: widget.spinning ? null : widget.onTap,
-      icon: RotationTransition(turns: _c, child: const Icon(Icons.sync, size: 18)),
-      label: Text(tr('Sinxron', 'Синхрон')),
     );
   }
 }
@@ -1156,8 +1096,14 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
   }
 
   Future<void> _addEquipment() async {
-    String type = 'polka';
-    final nameC = TextEditingController();
+    // admin katalogi
+    List catalog = [];
+    try {
+      final d = await Api.get('/api/equipment-catalog');
+      catalog = (d is List) ? d : ((d['items'] ?? []) as List);
+    } catch (_) {}
+    if (!mounted) return;
+    Map? selected;
     final noteC = TextEditingController();
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -1166,18 +1112,6 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
-        Widget chip(String v, String label) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(label),
-                selected: type == v,
-                onSelected: (_) => setS(() => type = v),
-                selectedColor: brand,
-                labelStyle: TextStyle(
-                    color: type == v ? Colors.white : ink,
-                    fontWeight: FontWeight.w600),
-              ),
-            );
         return Padding(
           padding: EdgeInsets.only(
               left: 16,
@@ -1191,43 +1125,66 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
               Text(tr('Oborudovaniya biriktirish', 'Прикрепить оборудование'),
                   style: const TextStyle(
                       fontSize: 17, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 14),
-              Row(children: [
-                chip('polka', tr('Polka', 'Полка')),
-                chip('fridge', tr('Xolodilnik', 'Холодильник')),
-                chip('stand', tr('Stend', 'Стенд')),
-              ]),
+              const SizedBox(height: 4),
+              Text(tr('Ro‘yxatdan tanlang (admin qo‘shgan)',
+                  'Выберите из списка (добавлено админом)'),
+                  style: const TextStyle(color: muted, fontSize: 12.5)),
               const SizedBox(height: 12),
-              TextField(
-                controller: nameC,
-                decoration: InputDecoration(
-                    labelText: tr('Nomi / raqami', 'Название / номер'),
-                    prefixIcon: const Icon(Icons.tag)),
-              ),
-              const SizedBox(height: 12),
+              if (catalog.isEmpty)
+                Text(tr('Katalog bo‘sh — admin qo‘shishi kerak',
+                    'Каталог пуст — админ должен добавить'),
+                    style: const TextStyle(color: danger))
+              else
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: catalog.map<Widget>((e) {
+                      final sel = selected != null && selected!['id'] == e['id'];
+                      return ListTile(
+                        dense: true,
+                        leading: Icon(
+                            '${e['type']}' == 'fridge'
+                                ? Icons.kitchen
+                                : ('${e['type']}' == 'stand'
+                                    ? Icons.view_column
+                                    : Icons.shelves),
+                            color: sel ? brand : muted),
+                        title: Text('${e['name']}'),
+                        trailing: sel
+                            ? const Icon(Icons.check_circle, color: brand)
+                            : null,
+                        onTap: () => setS(() => selected = e),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              const SizedBox(height: 8),
               TextField(
                 controller: noteC,
                 decoration: InputDecoration(
-                    labelText: tr('Izoh', 'Заметка'),
+                    labelText: tr('Izoh / raqami', 'Заметка / номер'),
                     prefixIcon: const Icon(Icons.notes)),
               ),
               const SizedBox(height: 16),
               GradientButton(
                 text: tr('Saqlash', 'Сохранить'),
                 icon: Icons.check,
-                onTap: () => Navigator.pop(ctx, true),
+                onTap: selected == null
+                    ? null
+                    : () => Navigator.pop(ctx, true),
               ),
             ],
           ),
         );
       }),
     );
-    if (ok != true) return;
+    if (ok != true || selected == null) return;
     try {
       await Api.post('/api/equipment', {
         'client_id': _id,
-        'type': type,
-        'name': nameC.text.trim(),
+        'type': '${selected!['type'] ?? 'other'}',
+        'name': '${selected!['name'] ?? ''}',
         'note': noteC.text.trim(),
         'status': 'active',
       });
@@ -1268,6 +1225,17 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
     final photo = c['photo'];
     final stat = card['stat'] ?? {};
     return Scaffold(
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: GradientButton(
+            text: tr('Tashrif boshlash', 'Начать визит'),
+            icon: Icons.login,
+            onTap: () =>
+                Navigator.push(context, fadeRoute(VisitScreen(client: c))),
+          ),
+        ),
+      ),
       body: ListView(
         padding: EdgeInsets.zero,
         children: [
@@ -1300,7 +1268,35 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   child: Row(children: [
-                    Avatar('${c['name'] ?? '?'}', size: 54),
+                    GestureDetector(
+                      onTap: photoBusy ? null : _editPhoto,
+                      child: Stack(children: [
+                        (photo != null && '$photo'.isNotEmpty)
+                            ? ClipOval(
+                                child: Image.network('${Api.base}$photo',
+                                    width: 54,
+                                    height: 54,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        Avatar('${c['name'] ?? '?'}', size: 54)))
+                            : Avatar('${c['name'] ?? '?'}', size: 54),
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: brand, width: 1)),
+                            child: Icon(
+                                photoBusy ? Icons.hourglass_bottom : Icons.camera_alt,
+                                size: 12,
+                                color: brand),
+                          ),
+                        ),
+                      ]),
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1336,14 +1332,19 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                           label: bal > 0 ? tr('Qarz', 'Долг') : tr('Balans', 'Баланс'),
                           value: bal,
                           isMoney: true,
-                          color: bal > 0 ? danger : ok)),
+                          color: bal > 0 ? danger : ok,
+                          onTap: () => _aktSverka(bal))),
                   const SizedBox(width: 12),
                   Expanded(
                       child: StatCard(
                           icon: Icons.receipt_long,
                           label: tr('Zakazlar', 'Заказы'),
                           value: asNum(stat['orders']),
-                          color: info)),
+                          color: info,
+                          onTap: () => Navigator.push(
+                              context,
+                              fadeRoute(ClientOrdersScreen(
+                                  clientId: _id, name: '${c['name']}'))))),
                 ]),
                 if (weekdays.isNotEmpty) ...[
                   SectionTitle(tr('Tashrif kunlari', 'Дни визитов')),
@@ -1419,7 +1420,12 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                 else
                   ...orders.take(3).map((o) => Padding(
                         padding: const EdgeInsets.only(bottom: 10),
-                        child: OrderTile(o),
+                        child: OrderTile(o,
+                            onTap: () => Navigator.push(
+                                context,
+                                fadeRoute(NakladnoyScreen(
+                                    orderId: o['id'] as int,
+                                    clientName: '${c['name']}')))),
                       )),
                 // Oborudovaniya (polka/xolodilnik)
                 SectionTitle(tr('Oborudovaniya', 'Оборудование'),
@@ -1475,14 +1481,7 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                           ]),
                         ),
                       )),
-                const SizedBox(height: 20),
-                GradientButton(
-                  text: tr('Tashrif boshlash', 'Начать визит'),
-                  icon: Icons.login,
-                  onTap: () => Navigator.push(
-                      context, fadeRoute(VisitScreen(client: c))),
-                ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 16),
               ],
             ),
           ),
@@ -1537,6 +1536,8 @@ class ClientOrdersScreen extends StatefulWidget {
 class _ClientOrdersScreenState extends State<ClientOrdersScreen> {
   List items = [];
   bool loading = true;
+  DateTimeRange? range;
+
   @override
   void initState() {
     super.initState();
@@ -1551,48 +1552,286 @@ class _ClientOrdersScreenState extends State<ClientOrdersScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  List get filtered {
+    if (range == null) return items;
+    return items.where((o) {
+      final s = '${o['created_at'] ?? ''}';
+      if (s.length < 10) return true;
+      final d = DateTime.tryParse(s.substring(0, 10));
+      if (d == null) return true;
+      return !d.isBefore(range!.start) &&
+          !d.isAfter(range!.end.add(const Duration(days: 1)));
+    }).toList();
+  }
+
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 2),
+      lastDate: now,
+      initialDateRange: range,
+    );
+    if (r != null) setState(() => range = r);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final list = filtered;
     return Scaffold(
       body: Column(children: [
         GradientHeader(
-          padding: const EdgeInsets.fromLTRB(8, 4, 18, 20),
-          child: Row(children: [
-            IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.arrow_back, color: Colors.white)),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(tr('Zakazlar tarixi', 'История заказов'),
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800)),
-                  Text(widget.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: Colors.white.withOpacity(0.9), fontSize: 13)),
-                ],
-              ),
-            ),
-          ]),
+          padding: const EdgeInsets.fromLTRB(8, 4, 18, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back, color: Colors.white)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tr('Zakazlar tarixi', 'История заказов'),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800)),
+                      Text(widget.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.9),
+                              fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _pickRange,
+                    icon: const Icon(Icons.date_range, color: Colors.white, size: 18),
+                    label: Text(
+                        range == null
+                            ? tr('Sana bo‘yicha filtr', 'Фильтр по дате')
+                            : '${range!.start.toIso8601String().substring(0, 10)} — ${range!.end.toIso8601String().substring(0, 10)}',
+                        style: const TextStyle(color: Colors.white)),
+                    style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.white.withOpacity(0.6))),
+                  ),
+                ),
+                if (range != null)
+                  IconButton(
+                      onPressed: () => setState(() => range = null),
+                      icon: const Icon(Icons.close, color: Colors.white)),
+              ]),
+            ],
+          ),
         ),
         Expanded(
           child: loading
               ? const ListShimmer()
-              : items.isEmpty
+              : list.isEmpty
                   ? EmptyState(text: tr('Zakaz yo‘q', 'Заказов нет'))
                   : ListView.separated(
                       padding: const EdgeInsets.all(16),
-                      itemCount: items.length,
+                      itemCount: list.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (_, i) => OrderTile(items[i]),
+                      itemBuilder: (_, i) => OrderTile(list[i],
+                          onTap: () => Navigator.push(
+                              context,
+                              fadeRoute(NakladnoyScreen(
+                                  orderId: list[i]['id'] as int,
+                                  clientName: widget.name)))),
                     ),
         ),
       ]),
+    );
+  }
+}
+
+// ================= NAKLADNOY (zakaz hujjati) =================
+class NakladnoyScreen extends StatefulWidget {
+  final int orderId;
+  final String clientName;
+  const NakladnoyScreen(
+      {super.key, required this.orderId, required this.clientName});
+  @override
+  State<NakladnoyScreen> createState() => _NakladnoyScreenState();
+}
+
+class _NakladnoyScreenState extends State<NakladnoyScreen> {
+  Map order = {};
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final o = await Api.get('/api/orders/${widget.orderId}');
+      order = Map<String, dynamic>.from(o);
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  List get _items => (order['items'] ?? []) as List;
+
+  List<List<dynamic>> _csvRows() {
+    final rows = <List<dynamic>>[
+      ['Nakladnoy #${order['id']}'],
+      [tr('Mijoz', 'Клиент'), widget.clientName],
+      [tr('Sana', 'Дата'), '${order['created_at'] ?? ''}'],
+      [],
+      ['#', tr('Mahsulot', 'Товар'), tr('Soni', 'Кол-во'),
+        tr('Narx', 'Цена'), tr('Summa', 'Сумма')],
+    ];
+    int i = 1;
+    for (final it in _items) {
+      rows.add([
+        i++,
+        '${it['product_name'] ?? ''}',
+        asNum(it['qty']),
+        asNum(it['price']),
+        asNum(it['line_sum'] ?? asNum(it['qty']) * asNum(it['price'])),
+      ]);
+    }
+    rows.add([]);
+    rows.add(['', '', '', tr('Jami', 'Итого'), asNum(order['total'])]);
+    return rows;
+  }
+
+  Future<void> _share() async {
+    try {
+      await shareCsv('nakladnoy_${order['id']}.csv', _csvRows(),
+          subject: 'Nakladnoy #${order['id']}',
+          text: '${widget.clientName} · ${money(asNum(order['total']))}');
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final st = '${order['status'] ?? ''}';
+    return Scaffold(
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: loading ? null : _share,
+                icon: const Icon(Icons.ios_share),
+                label: Text(tr('Ulashish', 'Поделиться')),
+                style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: GradientButton(
+                text: 'Excel',
+                icon: Icons.table_view,
+                onTap: loading ? null : _share,
+              ),
+            ),
+          ]),
+        ),
+      ),
+      body: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          GradientHeader(
+            padding: const EdgeInsets.fromLTRB(8, 4, 18, 20),
+            child: Row(children: [
+              IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back, color: Colors.white)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${tr('Nakladnoy', 'Накладная')} #${widget.orderId}',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800)),
+                    Text(widget.clientName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                  ],
+                ),
+              ),
+              if (st.isNotEmpty)
+                Pill(statusLabel(st), color: Colors.white),
+            ]),
+          ),
+          if (loading)
+            const Padding(padding: EdgeInsets.all(16), child: ListShimmer())
+          else
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Panel(
+                    child: Column(children: [
+                      for (final it in _items) ...[
+                        Row(children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${it['product_name'] ?? ''}',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: ink)),
+                                Text(
+                                    '${asNum(it['qty']).toStringAsFixed(0)} × ${money(asNum(it['price']))}',
+                                    style: const TextStyle(
+                                        color: muted, fontSize: 12.5)),
+                              ],
+                            ),
+                          ),
+                          Text(
+                              money(asNum(it['line_sum'] ??
+                                  asNum(it['qty']) * asNum(it['price']))),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, color: ink)),
+                        ]),
+                        if (it != _items.last) const Divider(height: 20),
+                      ],
+                    ]),
+                  ),
+                  const SizedBox(height: 14),
+                  Panel(
+                    color: brand.withOpacity(0.06),
+                    child: Row(children: [
+                      Text(tr('Jami', 'Итого'),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 16)),
+                      const Spacer(),
+                      Text(money(asNum(order['total'])),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 18,
+                              color: brand)),
+                    ]),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1615,6 +1854,7 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
   Map data = {};
   List rows = [];
   bool loading = true;
+  DateTimeRange? range;
 
   @override
   void initState() {
@@ -1641,10 +1881,92 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
     if (mounted) setState(() => loading = false);
   }
 
+  List get filteredRows {
+    if (range == null) return rows;
+    return rows.where((r) {
+      final s = '${r['ts'] ?? r['created_at'] ?? r['date'] ?? ''}';
+      if (s.length < 10) return true;
+      final d = DateTime.tryParse(s.substring(0, 10));
+      if (d == null) return true;
+      return !d.isBefore(range!.start) &&
+          !d.isAfter(range!.end.add(const Duration(days: 1)));
+    }).toList();
+  }
+
+  Future<void> _pickRange() async {
+    final now = DateTime.now();
+    final r = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 2),
+      lastDate: now,
+      initialDateRange: range,
+    );
+    if (r != null) setState(() => range = r);
+  }
+
+  Future<void> _share() async {
+    final list = filteredRows;
+    final csv = <List<dynamic>>[
+      ['${tr('Akt-sverka', 'Акт-сверка')}: ${widget.name}'],
+      if (range != null)
+        [tr('Davr', 'Период'),
+          '${range!.start.toIso8601String().substring(0, 10)} — ${range!.end.toIso8601String().substring(0, 10)}'],
+      [],
+      [tr('Sana', 'Дата'), tr('Turi', 'Тип'), tr('Summa', 'Сумма'),
+        tr('Qoldiq', 'Остаток')],
+    ];
+    for (final r in list) {
+      final type = '${r['type'] ?? r['status'] ?? ''}';
+      csv.add([
+        '${r['ts'] ?? r['created_at'] ?? ''}',
+        type == 'debt'
+            ? tr('Qarz', 'Долг')
+            : type == 'payment'
+                ? tr('To‘lov', 'Оплата')
+                : type,
+        asNum(r['total'] ?? r['amount'] ?? 0),
+        r['balance'] ?? '',
+      ]);
+    }
+    csv.add([]);
+    csv.add(['', tr('Qoldiq', 'Остаток'), asNum(data['balance'] ?? widget.balance)]);
+    try {
+      await shareCsv('akt_sverka_${widget.clientId}.csv', csv,
+          subject: '${tr('Akt-sverka', 'Акт-сверка')} — ${widget.name}');
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bal = asNum(data['balance'] ?? widget.balance);
+    final list = filteredRows;
     return Scaffold(
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: loading ? null : _share,
+                icon: const Icon(Icons.ios_share),
+                label: Text(tr('Ulashish', 'Поделиться')),
+                style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: GradientButton(
+                text: 'Excel',
+                icon: Icons.table_view,
+                onTap: loading ? null : _share,
+              ),
+            ),
+          ]),
+        ),
+      ),
       body: Column(children: [
         GradientHeader(
           padding: const EdgeInsets.fromLTRB(8, 4, 18, 22),
@@ -1695,6 +2017,28 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
                                 fontSize: 18)),
                       ]),
                     ),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _pickRange,
+                          icon: const Icon(Icons.date_range,
+                              color: Colors.white, size: 18),
+                          label: Text(
+                              range == null
+                                  ? tr('Sana bo‘yicha', 'По дате')
+                                  : '${range!.start.toIso8601String().substring(0, 10)} — ${range!.end.toIso8601String().substring(0, 10)}',
+                              style: const TextStyle(color: Colors.white)),
+                          style: OutlinedButton.styleFrom(
+                              side: BorderSide(
+                                  color: Colors.white.withOpacity(0.6))),
+                        ),
+                      ),
+                      if (range != null)
+                        IconButton(
+                            onPressed: () => setState(() => range = null),
+                            icon: const Icon(Icons.close, color: Colors.white)),
+                    ]),
                   ],
                 ),
               ),
@@ -1704,14 +2048,14 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
         Expanded(
           child: loading
               ? const ListShimmer()
-              : rows.isEmpty
+              : list.isEmpty
                   ? EmptyState(text: tr('Harakat yo‘q', 'Нет операций'))
                   : ListView.separated(
                       padding: const EdgeInsets.all(16),
-                      itemCount: rows.length,
+                      itemCount: list.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (_, i) {
-                        final r = rows[i] as Map;
+                        final r = list[i] as Map;
                         final amount =
                             asNum(r['total'] ?? r['amount'] ?? 0);
                         final date =
@@ -1791,6 +2135,8 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
   int? territoryId, categoryId;
   List territories = [], categories = [];
   bool busy = false;
+  String? photoUrl;
+  bool photoBusy = false;
 
   bool get isEdit => widget.client != null;
 
@@ -1804,6 +2150,9 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       inn.text = '${c['inn'] ?? ''}';
       address.text = '${c['address'] ?? ''}';
       orientir.text = '${c['orientir'] ?? ''}';
+      photoUrl = (c['photo'] != null && '${c['photo']}'.isNotEmpty)
+          ? '${c['photo']}'
+          : null;
       akb = asNum(c['is_akb']) == 1;
       if (c['lat'] != null) lat = asNum(c['lat']).toDouble();
       if (c['lng'] != null) lng = asNum(c['lng']).toDouble();
@@ -1836,6 +2185,36 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     }
   }
 
+  Future<void> _pickPhoto() async {
+    final src = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+              leading: const Icon(Icons.camera_alt, color: brand),
+              title: Text(tr('Kamera', 'Камера')),
+              onTap: () => Navigator.pop(context, ImageSource.camera)),
+          ListTile(
+              leading: const Icon(Icons.photo_library, color: brand),
+              title: Text(tr('Galereya', 'Галерея')),
+              onTap: () => Navigator.pop(context, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (src == null) return;
+    final x = await ImagePicker().pickImage(source: src, imageQuality: 60);
+    if (x == null) return;
+    setState(() => photoBusy = true);
+    try {
+      final url = await Api.uploadPhoto(File(x.path));
+      setState(() => photoUrl = url);
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    } finally {
+      if (mounted) setState(() => photoBusy = false);
+    }
+  }
+
   Future<void> _save() async {
     if (name.text.trim().isEmpty) {
       snack(context, tr('Nomini kiriting', 'Введите название'));
@@ -1853,6 +2232,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
       'territory_id': territoryId,
       'category_id': categoryId,
       'is_akb': akb,
+      'photo': photoUrl,
       'weekdays': days.toList(),
     };
     try {
@@ -1973,6 +2353,52 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
                         color: lat != null ? ok : muted),
                   ]),
                 ),
+                const SizedBox(height: 12),
+                Panel(
+                  onTap: photoBusy ? null : _pickPhoto,
+                  child: Row(children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                          color: brand.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12)),
+                      child: photoBusy
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : (photoUrl != null
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network('${Api.base}$photoUrl',
+                                      width: 40, height: 40, fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) =>
+                                          const Icon(Icons.storefront,
+                                              color: brand)))
+                              : const Icon(Icons.add_a_photo, color: brand)),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(tr('Do‘kon rasmi', 'Фото точки'),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w700, color: ink)),
+                          Text(
+                              photoUrl != null
+                                  ? tr('Rasm tanlangan', 'Фото выбрано')
+                                  : tr('Rasm qo‘shish (ixtiyoriy)',
+                                      'Добавить фото'),
+                              style:
+                                  const TextStyle(color: muted, fontSize: 12.5)),
+                        ],
+                      ),
+                    ),
+                    Icon(photoUrl != null ? Icons.check_circle : Icons.chevron_right,
+                        color: photoUrl != null ? ok : muted),
+                  ]),
+                ),
                 const SizedBox(height: 16),
                 GradientButton(
                   text: tr('Saqlash', 'Сохранить'),
@@ -2045,37 +2471,10 @@ class _OrdersTabState extends State<OrdersTab> {
   }
 
   void _openOrder(Map o) {
-    final st = '${o['status'] ?? 'new'}';
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      builder: (_) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(children: [
-              Text('#${o['id']}',
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w800)),
-              const Spacer(),
-              Pill(statusLabel(st), color: statusColor(st)),
-            ]),
-            const SizedBox(height: 6),
-            Text('${o['client_name'] ?? ''}',
-                style: const TextStyle(color: muted)),
-            const SizedBox(height: 4),
-            Text(money(asNum(o['total'])),
-                style: const TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w900, color: brand)),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
+    Navigator.push(
+        context,
+        fadeRoute(NakladnoyScreen(
+            orderId: o['id'] as int, clientName: '${o['client_name'] ?? ''}')));
   }
 
   @override
@@ -2287,6 +2686,7 @@ class _AgentReportsTabState extends State<AgentReportsTab> {
                           isMoney: true,
                           color: accent)),
                 ]),
+                _kpiSection(),
                 SectionTitle(tr('To‘lov turlari', 'Виды оплаты')),
                 Panel(
                   child: Column(children: [
@@ -2305,13 +2705,79 @@ class _AgentReportsTabState extends State<AgentReportsTab> {
                 else
                   ...recent.map((o) => Padding(
                         padding: const EdgeInsets.only(bottom: 10),
-                        child: OrderTile(o),
+                        child: OrderTile(o,
+                            onTap: () => Navigator.push(
+                                context,
+                                fadeRoute(NakladnoyScreen(
+                                    orderId: o['id'] as int,
+                                    clientName: '${o['client_name'] ?? ''}')))),
                       )),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _kpiSection() {
+    final ts = asNum(kpi['target_sum']);
+    final ta = asNum(kpi['target_akb']);
+    final tv = asNum(kpi['target_visit']);
+    if (ts <= 0 && ta <= 0 && tv <= 0) return const SizedBox.shrink();
+    final rows = <Widget>[];
+    void add(Widget w) {
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 14));
+      rows.add(w);
+    }
+
+    if (ts > 0) {
+      add(_kpiRow(tr('Savdo', 'Продажа'), asNum(kpi['sales']), ts, brand,
+          money: true));
+    }
+    if (ta > 0) add(_kpiRow('AKB', asNum(kpi['akb']), ta, ok));
+    if (tv > 0) {
+      add(_kpiRow(tr('Tashrif', 'Визиты'), asNum(kpi['visits']), tv, info));
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SectionTitle(tr('Reja bajarilishi (KPI)', 'Выполнение плана (KPI)')),
+        Panel(child: Column(children: rows)),
+      ],
+    );
+  }
+
+  Widget _kpiRow(String label, num fact, num target, Color color,
+      {bool money = false}) {
+    final frac =
+        target > 0 ? (fact / target).clamp(0.0, 1.0).toDouble() : 0.0;
+    final pct = target > 0 ? (fact * 100 / target).round() : 0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+          const Spacer(),
+          Text(
+              '${money ? shortMoney(fact) : fact.round()} / ${money ? shortMoney(target) : target.round()}   ·   $pct%',
+              style: TextStyle(fontWeight: FontWeight.w800, color: color)),
+        ]),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: frac),
+            duration: const Duration(milliseconds: 800),
+            builder: (_, v, __) => LinearProgressIndicator(
+              value: v,
+              minHeight: 9,
+              backgroundColor: const Color(0xFFEFF2F6),
+              color: color,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2490,7 +2956,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 },
               ),
               const SizedBox(height: 14),
-              const Text('SalesGO v1.4',
+              const Text('SalesGO v1.5',
                   style: TextStyle(color: muted, fontSize: 12)),
             ],
           ),
@@ -2565,7 +3031,8 @@ class _VisitScreenState extends State<VisitScreen> {
   bool checkinFailed = false;
   String result = 'no_order';
   double? distance;
-  int photoCount = 0;
+  int beforeCount = 0, afterCount = 0;
+  List equipment = [];
   final comment = TextEditingController();
 
   @override
@@ -2573,6 +3040,15 @@ class _VisitScreenState extends State<VisitScreen> {
     super.initState();
     // Vizit ochilishi bilan avtomatik check-in (alohida "boshlash" oynasi yo'q)
     _checkin();
+    _loadEquipment();
+  }
+
+  Future<void> _loadEquipment() async {
+    try {
+      final e = await Api.get('/api/clients/${widget.client['id']}/equipment');
+      equipment = (e is List) ? e : ((e['items'] ?? []) as List);
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   @override
@@ -2616,15 +3092,80 @@ class _VisitScreenState extends State<VisitScreen> {
     }
   }
 
-  Future<void> _photo() async {
-    // Kamera rasmi ilova keshiga tushadi, telefon galereyasiga saqlanmaydi.
-    final x = await ImagePicker().pickImage(
-        source: ImageSource.camera, imageQuality: 60, requestFullMetadata: false);
-    if (x == null) return;
-    final okSent = await SyncStore.sendOrQueuePhoto(
-        visitId: visitId, path: x.path, type: 'shelf');
+  /// Faqat KAMERA (galereya yo'q). Rasm olgach ilova ichida tasdiq oynasi:
+  /// "Изменить" (qayta olish) yoki "Готово" (tasdiqlash). Tasdiqlansa yo'lni
+  /// qaytaradi, aks holda null.
+  Future<String?> _capturePhoto() async {
+    while (true) {
+      final x = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          imageQuality: 60,
+          requestFullMetadata: false);
+      if (x == null) return null;
+      if (!mounted) return null;
+      final ok = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(18)),
+                child: Image.file(File(x.path),
+                    height: 340, width: double.infinity, fit: BoxFit.cover),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(context, false),
+                      icon: const Icon(Icons.refresh),
+                      label: Text(tr('Изменить', 'Изменить')),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: FilledButton.styleFrom(
+                          backgroundColor: brand,
+                          padding: const EdgeInsets.symmetric(vertical: 12)),
+                      icon: const Icon(Icons.check),
+                      label: Text(tr('Готово', 'Готово')),
+                    ),
+                  ),
+                ]),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (ok == true) return x.path;
+      // aks holda: qayta rasimga olish (davom etadi)
+    }
+  }
+
+  Future<void> _addPhoto(String type) async {
+    final path = await _capturePhoto();
+    if (path == null) return;
+    final okSent =
+        await SyncStore.sendOrQueuePhoto(visitId: visitId, path: path, type: type);
     if (mounted) {
-      setState(() => photoCount++);
+      setState(() {
+        if (type == 'before') {
+          beforeCount++;
+        } else {
+          afterCount++;
+        }
+      });
       snack(
           context,
           okSent
@@ -2749,16 +3290,45 @@ class _VisitScreenState extends State<VisitScreen> {
                           if (okr == true) setState(() => result = 'order');
                         },
                       ),
-                      const SizedBox(height: 12),
-                      _action(
-                        icon: Icons.camera_alt,
-                        color: info,
-                        title: photoCount > 0
-                            ? '${tr('Javon rasmi', 'Фото полки')} · $photoCount'
-                            : tr('Javon rasmi', 'Фото полки'),
-                        sub: tr('Merchandising uchun foto', 'Фото для мерчендайзинга'),
-                        onTap: _photo,
-                      ),
+                      const SizedBox(height: 18),
+                      Row(children: [
+                        Text(tr('Foto-otchyot', 'Фото-отчёт'),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, color: ink)),
+                        const SizedBox(width: 6),
+                        const Icon(Icons.photo_camera, size: 15, color: muted),
+                        const SizedBox(width: 3),
+                        Text(tr('(faqat kamera)', '(только камера)'),
+                            style: const TextStyle(color: muted, fontSize: 11.5)),
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                            child: _photoBtn(tr('Foto: До', 'Фото: До'),
+                                Icons.photo_camera_back, beforeCount,
+                                () => _addPhoto('before'))),
+                        const SizedBox(width: 12),
+                        Expanded(
+                            child: _photoBtn(tr('Foto: После', 'Фото: После'),
+                                Icons.photo_camera_front, afterCount,
+                                () => _addPhoto('after'))),
+                      ]),
+                      if (equipment.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Row(children: [
+                            const Icon(Icons.info_outline,
+                                size: 15, color: warn),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                  tr('Oborudovaniya (${equipment.length}) rasmini ham До/После oling',
+                                      'Сделайте фото До/После оборудования (${equipment.length})'),
+                                  style: const TextStyle(
+                                      color: muted, fontSize: 12)),
+                            ),
+                          ]),
+                        ),
                       const SizedBox(height: 20),
                       Text(tr('Tashrif natijasi', 'Результат визита'),
                           style: const TextStyle(
@@ -2804,6 +3374,31 @@ class _VisitScreenState extends State<VisitScreen> {
       selectedColor: brand,
       labelStyle: TextStyle(
           color: sel ? Colors.white : ink, fontWeight: FontWeight.w600),
+    );
+  }
+
+  Widget _photoBtn(String label, IconData icon, int count, VoidCallback onTap) {
+    final done = count > 0;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+            color: done ? ok.withOpacity(0.10) : info.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: done ? ok : line)),
+        child: Column(children: [
+          Icon(icon, color: done ? ok : info, size: 26),
+          const SizedBox(height: 6),
+          Text(label,
+              style: const TextStyle(fontWeight: FontWeight.w700, color: ink)),
+          if (done)
+            Text('$count ${tr('ta', 'шт')}',
+                style: const TextStyle(
+                    color: ok, fontSize: 12, fontWeight: FontWeight.w600)),
+        ]),
+      ),
     );
   }
 
