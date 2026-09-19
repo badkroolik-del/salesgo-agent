@@ -9,6 +9,7 @@ import 'theme.dart';
 import 'ui.dart';
 import 'maps.dart';
 import 'main.dart';
+import 'sync.dart';
 
 String _today() => DateTime.now().toIso8601String().substring(0, 10);
 
@@ -125,7 +126,7 @@ class _DashboardTabState extends State<DashboardTab> {
   bool loading = true;
   bool refreshing = false;
   num salesToday = 0, ordersToday = 0, routeToday = 0, debtors = 0;
-  List recent = [];
+  List drafts = [];
   List route = [];
   Set doneIds = {};
 
@@ -147,8 +148,13 @@ class _DashboardTabState extends State<DashboardTab> {
       route = (rt['items'] ?? []) as List;
       routeToday = route.length;
       debtors = cl.where((x) => asNum(x['balance']) > 0).length;
-      recent = items.take(6).toList();
       doneIds = items.map((e) => e['client_id']).toSet();
+      try {
+        final dr = await Api.get('/api/orders?status=draft&limit=50');
+        drafts = (dr['items'] ?? []) as List;
+      } catch (_) {
+        drafts = [];
+      }
       _sortRoute(null);
     } catch (_) {}
     if (mounted) setState(() => loading = false);
@@ -275,6 +281,16 @@ class _DashboardTabState extends State<DashboardTab> {
                           onTap: () => Navigator.push(context,
                               fadeRoute(const DebtorsScreen())))),
                 ]),
+                const SizedBox(height: 16),
+                // KATTA sinxron tugmasi — uzun bosilsa server bilan sinxron
+                _BigSyncButton(onDone: _load),
+                if (drafts.isNotEmpty) ...[
+                  SectionTitle(tr('Chernovik zakazlar', 'Черновики заказов')),
+                  ...drafts.map((o) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: OrderTile(o),
+                      )),
+                ],
                 SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня'),
                     trailing:
                         _SyncButton(spinning: refreshing, onTap: _refresh)),
@@ -301,27 +317,178 @@ class _DashboardTabState extends State<DashboardTab> {
                           },
                         ),
                       )),
-                SectionTitle(tr('So‘nggi zakazlar', 'Последние заказы'),
-                    trailing: TextButton(
-                        onPressed: () => widget.onGoto(2),
-                        child: Text(tr('Barchasi', 'Все')))),
-                if (loading)
-                  const Column(children: [
-                    Shimmer(height: 64),
-                    SizedBox(height: 10),
-                    Shimmer(height: 64),
-                  ])
-                else if (recent.isEmpty)
-                  Panel(child: EmptyState(text: tr('Bugun zakaz yo‘q', 'Сегодня заказов нет')))
-                else
-                  ...recent.map((o) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: OrderTile(o),
-                      )),
+                const SizedBox(height: 10),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// KATTA sinxron tugmasi: uzun bosilganda navbatdagi zakaz/rasmlarni serverga
+// yuboradi va jarayonni (nechta zakaz / nechta rasm) ko'rsatadi.
+class _BigSyncButton extends StatefulWidget {
+  final Future<void> Function() onDone;
+  const _BigSyncButton({required this.onDone});
+  @override
+  State<_BigSyncButton> createState() => _BigSyncButtonState();
+}
+
+class _BigSyncButtonState extends State<_BigSyncButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900));
+  bool syncing = false;
+  int done = 0, total = 0, sentO = 0, sentP = 0, pending = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshPending();
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshPending() async {
+    final p = await SyncStore.pendingTotal();
+    if (mounted) setState(() => pending = p);
+  }
+
+  Future<void> _startSync() async {
+    if (syncing) return;
+    setState(() {
+      syncing = true;
+      done = 0;
+      total = 0;
+      sentO = 0;
+      sentP = 0;
+    });
+    _c.repeat();
+    Map<String, int> res = {'orders': 0, 'photos': 0};
+    try {
+      res = await SyncStore.flush((d, t, o, p) {
+        if (mounted) {
+          setState(() {
+            done = d;
+            total = t;
+            sentO = o;
+            sentP = p;
+          });
+        }
+      });
+    } catch (_) {}
+    _c.stop();
+    _c.value = 0;
+    await _refreshPending();
+    await widget.onDone();
+    if (!mounted) return;
+    setState(() => syncing = false);
+    final o = res['orders'] ?? 0, ph = res['photos'] ?? 0;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        icon: const Icon(Icons.cloud_done, color: ok, size: 42),
+        title: Text(tr('Sinxron tugadi', 'Синхронизация завершена'),
+            textAlign: TextAlign.center),
+        content: Text(
+          (o == 0 && ph == 0)
+              ? tr('Hammasi allaqachon sinxron ✓',
+                  'Всё уже синхронизировано ✓')
+              : '${tr('Zakazlar', 'Заказы')}: $o\n${tr('Rasmlar', 'Фото')}: $ph',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        actions: [
+          Center(
+            child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK')),
+          )
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onLongPress: _startSync,
+      onTap: () {
+        if (!syncing) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(tr('Sinxron uchun tugmani bosib turing',
+                'Удерживайте кнопку для синхронизации')),
+            duration: const Duration(seconds: 2),
+          ));
+        }
+      },
+      child: Container(
+        height: 64,
+        width: double.infinity,
+        decoration: BoxDecoration(
+            gradient: brandGradient,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: softShadow),
+        child: syncing
+            ? Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    RotationTransition(
+                        turns: _c,
+                        child: const Icon(Icons.sync,
+                            color: Colors.white, size: 22)),
+                    const SizedBox(width: 10),
+                    Text(
+                        total == 0
+                            ? tr('Sinxronlanmoqda…', 'Синхронизация…')
+                            : '$done/$total',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16)),
+                  ]),
+                  const SizedBox(height: 2),
+                  Text(
+                      '${tr('Zakaz', 'Заказы')}: $sentO   ·   ${tr('Rasm', 'Фото')}: $sentP',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600)),
+                ],
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.cloud_upload, color: Colors.white, size: 26),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(tr('Sinxronlash', 'Синхронизация'),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16.5)),
+                      Text(
+                          pending > 0
+                              ? '${tr('Kutilmoqda', 'Ожидает')}: $pending · ${tr('bosib turing', 'удерживайте')}'
+                              : tr('serverga yuborish · bosib turing',
+                                  'отправить · удерживайте'),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.85),
+                              fontSize: 11.5)),
+                    ],
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -629,7 +796,7 @@ class _ClientsTabState extends State<ClientsTab> {
   List all = [];
   bool loading = true;
   String q = '';
-  String filter = 'all'; // all/debt/akb/okb
+  String filter = 'all'; // all/debt/akb
   int day = 0; // 0 = hammasi, 1..7 = weekday
 
   @override
@@ -870,7 +1037,12 @@ class ClientCardScreen extends StatefulWidget {
 class _ClientCardScreenState extends State<ClientCardScreen> {
   Map card = {};
   List weekdays = [];
+  List orders = [];
+  List equipment = [];
   bool loading = true;
+  bool photoBusy = false;
+
+  int get _id => widget.client['id'] as int;
 
   @override
   void initState() {
@@ -880,12 +1052,214 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
 
   Future<void> _load() async {
     try {
-      final d = await Api.get('/api/clients/${widget.client['id']}/card');
+      final d = await Api.get('/api/clients/$_id/card');
       card = Map<String, dynamic>.from(d);
       weekdays = card['weekdays'] ?? [];
     } catch (_) {}
+    try {
+      final o = await Api.get('/api/clients/$_id/orders');
+      orders = (o is List) ? o : ((o['items'] ?? []) as List);
+    } catch (_) {
+      orders = [];
+    }
+    try {
+      final e = await Api.get('/api/clients/$_id/equipment');
+      equipment = (e is List) ? e : ((e['items'] ?? []) as List);
+    } catch (_) {
+      equipment = [];
+    }
     if (mounted) setState(() => loading = false);
   }
+
+  Future<void> _editPhoto() async {
+    final src = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(
+              leading: const Icon(Icons.camera_alt, color: brand),
+              title: Text(tr('Kamera', 'Камера')),
+              onTap: () => Navigator.pop(context, ImageSource.camera)),
+          ListTile(
+              leading: const Icon(Icons.photo_library, color: brand),
+              title: Text(tr('Galereya', 'Галерея')),
+              onTap: () => Navigator.pop(context, ImageSource.gallery)),
+        ]),
+      ),
+    );
+    if (src == null) return;
+    final x = await ImagePicker().pickImage(source: src, imageQuality: 60);
+    if (x == null) return;
+    setState(() => photoBusy = true);
+    try {
+      final url = await Api.uploadPhoto(File(x.path));
+      final c = _client;
+      await Api.post('/api/clients/$_id', {
+        'name': '${c['name'] ?? ''}',
+        'territory_id': c['territory_id'],
+        'category_id': c['category_id'],
+        'inn': c['inn'],
+        'address': c['address'],
+        'orientir': c['orientir'],
+        'lat': c['lat'] == null ? null : asNum(c['lat']).toDouble(),
+        'lng': c['lng'] == null ? null : asNum(c['lng']).toDouble(),
+        'phone': c['phone'],
+        'photo': url,
+        'is_akb': asNum(c['is_akb']) == 1,
+        'weekdays': weekdays.map((w) => asNum(w).toInt()).toList(),
+      }, put: true);
+      if (mounted) snack(context, tr('Rasm yangilandi', 'Фото обновлено'));
+      await _load();
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    } finally {
+      if (mounted) setState(() => photoBusy = false);
+    }
+  }
+
+  void _infoSheet(Map c) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(tr('Do‘kon ma‘lumotlari', 'Информация о точке'),
+              style:
+                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 14),
+          _row(Icons.phone, tr('Telefon', 'Телефон'), '${c['phone'] ?? '-'}'),
+          const Divider(height: 20),
+          _row(Icons.place, tr('Manzil', 'Адрес'),
+              '${c['address'] ?? c['territory_name'] ?? '-'}'),
+          const Divider(height: 20),
+          _row(Icons.near_me, tr('Orientir', 'Ориентир'),
+              '${c['orientir'] ?? '-'}'),
+          const Divider(height: 20),
+          _row(Icons.badge, 'INN', '${c['inn'] ?? '-'}'),
+          const Divider(height: 20),
+          _row(Icons.category, tr('Kategoriya', 'Категория'),
+              '${c['category_name'] ?? '-'}'),
+          const Divider(height: 20),
+          _row(Icons.map, tr('Koordinata', 'Координаты'),
+              c['lat'] != null ? '${c['lat']}, ${c['lng']}' : '-'),
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _aktSverka(num bal) async {
+    Navigator.push(context,
+        fadeRoute(ReconcileScreen(clientId: _id, name: '${_client['name']}', balance: bal)));
+  }
+
+  Future<void> _addEquipment() async {
+    String type = 'polka';
+    final nameC = TextEditingController();
+    final noteC = TextEditingController();
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        Widget chip(String v, String label) => Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(label),
+                selected: type == v,
+                onSelected: (_) => setS(() => type = v),
+                selectedColor: brand,
+                labelStyle: TextStyle(
+                    color: type == v ? Colors.white : ink,
+                    fontWeight: FontWeight.w600),
+              ),
+            );
+        return Padding(
+          padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16,
+              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(tr('Oborudovaniya biriktirish', 'Прикрепить оборудование'),
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 14),
+              Row(children: [
+                chip('polka', tr('Polka', 'Полка')),
+                chip('fridge', tr('Xolodilnik', 'Холодильник')),
+                chip('stand', tr('Stend', 'Стенд')),
+              ]),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameC,
+                decoration: InputDecoration(
+                    labelText: tr('Nomi / raqami', 'Название / номер'),
+                    prefixIcon: const Icon(Icons.tag)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteC,
+                decoration: InputDecoration(
+                    labelText: tr('Izoh', 'Заметка'),
+                    prefixIcon: const Icon(Icons.notes)),
+              ),
+              const SizedBox(height: 16),
+              GradientButton(
+                text: tr('Saqlash', 'Сохранить'),
+                icon: Icons.check,
+                onTap: () => Navigator.pop(ctx, true),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+    if (ok != true) return;
+    try {
+      await Api.post('/api/equipment', {
+        'client_id': _id,
+        'type': type,
+        'name': nameC.text.trim(),
+        'note': noteC.text.trim(),
+        'status': 'active',
+      });
+      await _load();
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    }
+  }
+
+  Future<void> _delEquipment(int id) async {
+    try {
+      await Api.delete('/api/equipment/$id');
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    }
+    await _load();
+  }
+
+  String _eqLabel(String t) {
+    switch (t) {
+      case 'polka':
+        return tr('Polka', 'Полка');
+      case 'fridge':
+        return tr('Xolodilnik', 'Холодильник');
+      case 'stand':
+        return tr('Stend', 'Стенд');
+      default:
+        return t;
+    }
+  }
+
+  Map get _client => (card['client'] ?? widget.client) as Map;
 
   @override
   Widget build(BuildContext context) {
@@ -981,38 +1355,126 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                               color: brand, icon: Icons.event))
                           .toList()),
                 ],
-                SectionTitle(tr('Ma‘lumot', 'Информация')),
-                Panel(
-                  child: Column(children: [
-                    _row(Icons.phone, tr('Telefon', 'Телефон'), '${c['phone'] ?? '-'}'),
-                    const Divider(height: 20),
-                    _row(Icons.place, tr('Manzil', 'Адрес'),
-                        '${c['address'] ?? c['territory_name'] ?? '-'}'),
-                    const Divider(height: 20),
-                    _row(Icons.near_me, tr('Orientir', 'Ориентир'), '${c['orientir'] ?? '-'}'),
-                    const Divider(height: 20),
-                    _row(Icons.badge, 'INN', '${c['inn'] ?? '-'}'),
-                    const Divider(height: 20),
-                    _row(Icons.map, tr('Koordinata', 'Координаты'),
-                        c['lat'] != null ? '${c['lat']}, ${c['lng']}' : '-'),
-                  ]),
-                ),
-                if (photo != null && '$photo'.isNotEmpty) ...[
-                  SectionTitle(tr('Do‘kon rasmi', 'Фото точки')),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.network('${Api.base}$photo',
-                        height: 180,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                            height: 120,
-                            color: const Color(0xFFF1F5F9),
-                            child: const Center(
-                                child: Icon(Icons.image_not_supported,
-                                    color: muted)))),
+                // Amallar: ma'lumot (i) + akt-sverka
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _infoSheet(c),
+                      icon: const Icon(Icons.info_outline),
+                      label: Text(tr('Ma‘lumot', 'Инфо')),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12)),
+                    ),
                   ),
-                ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _aktSverka(bal),
+                      icon: const Icon(Icons.receipt_long),
+                      label: Text(tr('Akt-sverka', 'Акт-сверка')),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12)),
+                    ),
+                  ),
+                ]),
+                // Do'kon rasmi (o'zgartirsa bo'ladi)
+                SectionTitle(tr('Do‘kon rasmi', 'Фото точки'),
+                    trailing: TextButton.icon(
+                        onPressed: photoBusy ? null : _editPhoto,
+                        icon: photoBusy
+                            ? const SizedBox(
+                                height: 14,
+                                width: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.camera_alt, size: 18),
+                        label: Text(tr('O‘zgartirish', 'Изменить')))),
+                GestureDetector(
+                  onTap: photoBusy ? null : _editPhoto,
+                  child: (photo != null && '$photo'.isNotEmpty)
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.network('${Api.base}$photo',
+                              height: 180,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => _photoPh()),
+                        )
+                      : _photoPh(),
+                ),
+                // Do'kon istoriyasi (oxirgi zakazlar)
+                SectionTitle(tr('Do‘kon tarixi', 'История точки'),
+                    trailing: orders.length > 3
+                        ? TextButton(
+                            onPressed: () => Navigator.push(
+                                context,
+                                fadeRoute(ClientOrdersScreen(
+                                    clientId: _id, name: '${c['name']}'))),
+                            child: Text(tr('Barchasi', 'Все')))
+                        : null),
+                if (loading)
+                  const Shimmer(height: 64)
+                else if (orders.isEmpty)
+                  Panel(child: EmptyState(text: tr('Zakaz yo‘q', 'Заказов нет')))
+                else
+                  ...orders.take(3).map((o) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: OrderTile(o),
+                      )),
+                // Oborudovaniya (polka/xolodilnik)
+                SectionTitle(tr('Oborudovaniya', 'Оборудование'),
+                    trailing: TextButton.icon(
+                        onPressed: _addEquipment,
+                        icon: const Icon(Icons.add, size: 18),
+                        label: Text(tr('Qo‘shish', 'Добавить')))),
+                if (equipment.isEmpty)
+                  Panel(
+                      child: EmptyState(
+                          icon: Icons.kitchen_outlined,
+                          text: tr('Biriktirilmagan', 'Не прикреплено')))
+                else
+                  ...equipment.map((e) => Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Panel(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                  color: info.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: Icon(
+                                  '${e['type']}' == 'fridge'
+                                      ? Icons.kitchen
+                                      : ('${e['type']}' == 'stand'
+                                          ? Icons.view_column
+                                          : Icons.shelves),
+                                  color: info),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      '${_eqLabel('${e['type']}')}${(e['name'] ?? '').toString().isNotEmpty ? ' · ${e['name']}' : ''}',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: ink)),
+                                  if ('${e['note'] ?? ''}'.isNotEmpty)
+                                    Text('${e['note']}',
+                                        style: const TextStyle(
+                                            color: muted, fontSize: 12.5)),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                                onPressed: () => _delEquipment(e['id'] as int),
+                                icon: const Icon(Icons.delete_outline,
+                                    color: danger)),
+                          ]),
+                        ),
+                      )),
                 const SizedBox(height: 20),
                 GradientButton(
                   text: tr('Tashrif boshlash', 'Начать визит'),
@@ -1041,6 +1503,270 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
             style: const TextStyle(fontWeight: FontWeight.w600, color: ink)),
       ),
     ]);
+  }
+
+  Widget _photoPh() => Container(
+        height: 140,
+        width: double.infinity,
+        decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: line)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.add_a_photo_outlined, color: muted, size: 34),
+            const SizedBox(height: 8),
+            Text(tr('Rasm qo‘shish', 'Добавить фото'),
+                style: const TextStyle(color: muted, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      );
+}
+
+// ================= DO'KON ZAKAZLAR TARIXI =================
+class ClientOrdersScreen extends StatefulWidget {
+  final int clientId;
+  final String name;
+  const ClientOrdersScreen(
+      {super.key, required this.clientId, required this.name});
+  @override
+  State<ClientOrdersScreen> createState() => _ClientOrdersScreenState();
+}
+
+class _ClientOrdersScreenState extends State<ClientOrdersScreen> {
+  List items = [];
+  bool loading = true;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final o = await Api.get('/api/clients/${widget.clientId}/orders');
+      items = (o is List) ? o : ((o['items'] ?? []) as List);
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          padding: const EdgeInsets.fromLTRB(8, 4, 18, 20),
+          child: Row(children: [
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back, color: Colors.white)),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(tr('Zakazlar tarixi', 'История заказов'),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800)),
+                  Text(widget.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.9), fontSize: 13)),
+                ],
+              ),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : items.isEmpty
+                  ? EmptyState(text: tr('Zakaz yo‘q', 'Заказов нет'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) => OrderTile(items[i]),
+                    ),
+        ),
+      ]),
+    );
+  }
+}
+
+// ================= AKT-SVERKA =================
+class ReconcileScreen extends StatefulWidget {
+  final int clientId;
+  final String name;
+  final num balance;
+  const ReconcileScreen(
+      {super.key,
+      required this.clientId,
+      required this.name,
+      required this.balance});
+  @override
+  State<ReconcileScreen> createState() => _ReconcileScreenState();
+}
+
+class _ReconcileScreenState extends State<ReconcileScreen> {
+  Map data = {};
+  List rows = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final d = await Api.get('/api/clients/${widget.clientId}/reconcile');
+      if (d is Map) {
+        data = Map<String, dynamic>.from(d);
+        rows = (data['rows'] ?? data['items'] ?? data['entries'] ?? []) as List;
+      } else if (d is List) {
+        rows = d;
+      }
+    } catch (_) {
+      // fallback: zakazlar ro'yxati
+      try {
+        final o = await Api.get('/api/clients/${widget.clientId}/orders');
+        rows = (o is List) ? o : ((o['items'] ?? []) as List);
+      } catch (_) {}
+    }
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bal = asNum(data['balance'] ?? widget.balance);
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          padding: const EdgeInsets.fromLTRB(8, 4, 18, 22),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.arrow_back, color: Colors.white)),
+                Expanded(
+                  child: Text(tr('Akt-sverka', 'Акт-сверка'),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800)),
+                ),
+              ]),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.name,
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontSize: 14)),
+                    const SizedBox(height: 8),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.16),
+                          borderRadius: BorderRadius.circular(14)),
+                      child: Row(children: [
+                        Text(
+                            bal > 0
+                                ? tr('Joriy qarz', 'Текущий долг')
+                                : tr('Balans', 'Баланс'),
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.85),
+                                fontSize: 13)),
+                        const Spacer(),
+                        Text(money(bal),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18)),
+                      ]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : rows.isEmpty
+                  ? EmptyState(text: tr('Harakat yo‘q', 'Нет операций'))
+                  : ListView.separated(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: rows.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (_, i) {
+                        final r = rows[i] as Map;
+                        final amount =
+                            asNum(r['total'] ?? r['amount'] ?? 0);
+                        final date =
+                            '${r['ts'] ?? r['created_at'] ?? r['date'] ?? ''}';
+                        final type = '${r['type'] ?? r['status'] ?? ''}';
+                        final isPay = type == 'payment' || amount < 0;
+                        final label = type == 'debt'
+                            ? tr('Qarz (zakaz)', 'Долг (заказ)')
+                            : type == 'payment'
+                                ? tr('To‘lov', 'Оплата')
+                                : (r['id'] != null ? '#${r['id']}' : type);
+                        return Panel(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(children: [
+                            Icon(isPay ? Icons.south_west : Icons.north_east,
+                                color: isPay ? ok : danger, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(label,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          color: ink)),
+                                  if (date.isNotEmpty)
+                                    Text(
+                                        date.length >= 16
+                                            ? date.substring(0, 16)
+                                            : date,
+                                        style: const TextStyle(
+                                            color: muted, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(money(amount.abs()),
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        color: isPay ? ok : ink)),
+                                if (r['balance'] != null)
+                                  Text('= ${money(asNum(r['balance']))}',
+                                      style: const TextStyle(
+                                          color: muted, fontSize: 11.5)),
+                              ],
+                            ),
+                          ]),
+                        );
+                      },
+                    ),
+        ),
+      ]),
+    );
   }
 }
 
@@ -1764,7 +2490,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 },
               ),
               const SizedBox(height: 14),
-              const Text('SalesGO v1.3',
+              const Text('SalesGO v1.4',
                   style: TextStyle(color: muted, fontSize: 12)),
             ],
           ),
@@ -1836,11 +2562,30 @@ class VisitScreen extends StatefulWidget {
 class _VisitScreenState extends State<VisitScreen> {
   int? visitId;
   bool busy = false;
+  bool checkinFailed = false;
   String result = 'no_order';
   double? distance;
+  int photoCount = 0;
+  final comment = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Vizit ochilishi bilan avtomatik check-in (alohida "boshlash" oynasi yo'q)
+    _checkin();
+  }
+
+  @override
+  void dispose() {
+    comment.dispose();
+    super.dispose();
+  }
 
   Future<void> _checkin() async {
-    setState(() => busy = true);
+    setState(() {
+      busy = true;
+      checkinFailed = false;
+    });
     try {
       Position? pos;
       try {
@@ -1862,29 +2607,38 @@ class _VisitScreenState extends State<VisitScreen> {
       });
       setState(() => visitId = d['id']);
     } catch (e) {
-      if (mounted) snack(context, '$e');
+      if (mounted) {
+        setState(() => checkinFailed = true);
+        snack(context, '$e');
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
   }
 
   Future<void> _photo() async {
+    // Kamera rasmi ilova keshiga tushadi, telefon galereyasiga saqlanmaydi.
     final x = await ImagePicker().pickImage(
         source: ImageSource.camera, imageQuality: 60, requestFullMetadata: false);
     if (x == null) return;
-    try {
-      final url = await Api.uploadPhoto(File(x.path));
-      await Api.post('/api/photos',
-          {'visit_id': visitId, 'type': 'shelf', 'file_path': url});
-      if (mounted) snack(context, tr('Foto yuklandi', 'Фото загружено'));
-    } catch (e) {
-      if (mounted) snack(context, '$e');
+    final okSent = await SyncStore.sendOrQueuePhoto(
+        visitId: visitId, path: x.path, type: 'shelf');
+    if (mounted) {
+      setState(() => photoCount++);
+      snack(
+          context,
+          okSent
+              ? tr('Foto yuklandi', 'Фото загружено')
+              : tr('Foto navbatga saqlandi (sinxron qiling)',
+                  'Фото в очереди (синхронизируйте)'));
     }
   }
 
   Future<void> _checkout() async {
     try {
-      await Api.post('/api/visits/$visitId/checkout?result=$result', {});
+      final cm = Uri.encodeComponent(comment.text.trim());
+      await Api.post(
+          '/api/visits/$visitId/checkout?result=$result&comment=$cm', {});
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) snack(context, '$e');
@@ -1927,31 +2681,40 @@ class _VisitScreenState extends State<VisitScreen> {
             padding: const EdgeInsets.all(16),
             child: visitId == null
                 ? Column(children: [
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                          color: brand.withOpacity(0.08),
-                          shape: BoxShape.circle),
-                      child:
-                          const Icon(Icons.storefront, size: 56, color: brand),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(tr('Do‘konga yetib keldingizmi?', 'Вы прибыли в точку?'),
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 6),
-                    Text(tr('GPS joylashuvingiz qayd etiladi',
-                        'Ваше GPS-местоположение будет записано'),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: muted)),
-                    const SizedBox(height: 24),
-                    GradientButton(
-                      text: tr('Tashrifni boshlash', 'Начать визит'),
-                      icon: Icons.login,
-                      busy: busy,
-                      onTap: _checkin,
-                    ),
+                    const SizedBox(height: 40),
+                    if (checkinFailed) ...[
+                      const Icon(Icons.wifi_off, size: 52, color: warn),
+                      const SizedBox(height: 16),
+                      Text(tr('Tashrif boshlanmadi', 'Визит не начался'),
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      Text(
+                          tr('Internetni tekshiring va qayta urinib ko‘ring',
+                              'Проверьте интернет и повторите'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: muted)),
+                      const SizedBox(height: 24),
+                      GradientButton(
+                        text: tr('Qayta urinish', 'Повторить'),
+                        icon: Icons.refresh,
+                        busy: busy,
+                        onTap: _checkin,
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 8),
+                      const CircularProgressIndicator(color: brand),
+                      const SizedBox(height: 20),
+                      Text(tr('Tashrif boshlanmoqda…', 'Визит начинается…'),
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 6),
+                      Text(
+                          tr('GPS joylashuvingiz qayd etilmoqda',
+                              'GPS-местоположение фиксируется'),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: muted)),
+                    ],
                   ])
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1990,7 +2753,9 @@ class _VisitScreenState extends State<VisitScreen> {
                       _action(
                         icon: Icons.camera_alt,
                         color: info,
-                        title: tr('Javon rasmi', 'Фото полки'),
+                        title: photoCount > 0
+                            ? '${tr('Javon rasmi', 'Фото полки')} · $photoCount'
+                            : tr('Javon rasmi', 'Фото полки'),
                         sub: tr('Merchandising uchun foto', 'Фото для мерчендайзинга'),
                         onTap: _photo,
                       ),
@@ -2004,6 +2769,16 @@ class _VisitScreenState extends State<VisitScreen> {
                         _res(tr('Zakazsiz', 'Без заказа'), 'no_order'),
                         _res(tr('Yopiq', 'Закрыто'), 'closed'),
                       ]),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: comment,
+                        maxLines: 2,
+                        decoration: InputDecoration(
+                          labelText: tr('Izoh (ixtiyoriy)', 'Комментарий'),
+                          prefixIcon: const Icon(Icons.comment_outlined),
+                          alignLabelWithHint: true,
+                        ),
+                      ),
                       const SizedBox(height: 24),
                       GradientButton(
                         text: tr('Tashrifni yakunlash', 'Завершить визит'),
@@ -2078,15 +2853,23 @@ class OrderScreen extends StatefulWidget {
 
 class _OrderScreenState extends State<OrderScreen> {
   List products = [];
-  final Map<int, Map> cart = {};
+  final Map<int, Map> cart = {}; // id -> {product, qty(dona)}
   bool loading = true;
   String q = '';
   String cat = '';
+  final _orderComment = TextEditingController();
+  DateTime? _deliveryDate;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _orderComment.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -2123,6 +2906,7 @@ class _OrderScreenState extends State<OrderScreen> {
     final unit = '${p['unit'] ?? 'dona'}';
     final price = asNum(p['price']);
     int blok = 0, dona = (cart[id]?['qty'] ?? 0) as int;
+    // agar savatda bo'lsa, blok/dona ga ajratamiz
     if (box > 1 && dona > 0) {
       blok = dona ~/ box;
       dona = dona % box;
@@ -2509,12 +3293,77 @@ class _OrderScreenState extends State<OrderScreen> {
                   _payChip(tr('Qarz', 'Долг'), 'debt', pay,
                       (v) => setSheet(() => pay = v)),
                 ]),
-                const SizedBox(height: 16),
-                GradientButton(
-                  text: tr('Zakazni saqlash', 'Сохранить заказ'),
-                  icon: Icons.check,
-                  onTap: () => _submit(pay),
+                const SizedBox(height: 12),
+                // Yetkazish kuni (kalendar)
+                InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () async {
+                    final now = DateTime.now();
+                    final d = await showDatePicker(
+                      context: ctx,
+                      initialDate: _deliveryDate ??
+                          now.add(const Duration(days: 1)),
+                      firstDate: now,
+                      lastDate: now.add(const Duration(days: 60)),
+                    );
+                    if (d != null) setSheet(() => _deliveryDate = d);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                        border: Border.all(color: line),
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      const Icon(Icons.event, color: brand, size: 20),
+                      const SizedBox(width: 10),
+                      Text(tr('Yetkazish kuni', 'Дата доставки'),
+                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                      const Spacer(),
+                      Text(
+                          _deliveryDate == null
+                              ? tr('Tanlash', 'Выбрать')
+                              : _deliveryDate!
+                                  .toIso8601String()
+                                  .substring(0, 10),
+                          style: TextStyle(
+                              color:
+                                  _deliveryDate == null ? muted : brandDark,
+                              fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _orderComment,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: tr('Izoh (ixtiyoriy)', 'Комментарий'),
+                    prefixIcon: const Icon(Icons.comment_outlined),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _submit(pay, draft: true),
+                      icon: const Icon(Icons.drafts_outlined),
+                      label: Text(tr('Chernovik', 'Черновик')),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: GradientButton(
+                      text: tr('Zakazni saqlash', 'Сохранить заказ'),
+                      icon: Icons.check,
+                      onTap: () => _submit(pay, draft: false),
+                    ),
+                  ),
+                ]),
               ],
             ),
           );
@@ -2539,27 +3388,35 @@ class _OrderScreenState extends State<OrderScreen> {
     );
   }
 
-  Future<void> _submit(String pay) async {
-    try {
-      await Api.post('/api/orders', {
-        'client_id': widget.client['id'],
-        'visit_id': widget.visitId,
-        'pay_type': pay,
-        'client_uuid': DateTime.now().millisecondsSinceEpoch.toString(),
-        'items': cart.values
-            .map((e) => {
-                  'product_id': e['product']['id'],
-                  'qty': e['qty'],
-                  'price': e['product']['price'],
-                })
-            .toList(),
-      });
-      if (mounted) {
-        Navigator.pop(context);
-        Navigator.pop(context, true);
-      }
-    } catch (e) {
-      if (mounted) snack(context, '$e');
+  Future<void> _submit(String pay, {bool draft = false}) async {
+    final body = <String, dynamic>{
+      'client_id': widget.client['id'],
+      'visit_id': widget.visitId,
+      'pay_type': pay,
+      'status': draft ? 'draft' : 'new',
+      'comment': _orderComment.text.trim(),
+      'delivery_date': _deliveryDate?.toIso8601String().substring(0, 10),
+      'client_uuid': DateTime.now().millisecondsSinceEpoch.toString(),
+      'items': cart.values
+          .map((e) => {
+                'product_id': e['product']['id'],
+                'qty': e['qty'],
+                'price': e['product']['price'],
+              })
+          .toList(),
+    };
+    final sent = await SyncStore.sendOrQueueOrder(body);
+    if (mounted) {
+      Navigator.pop(context); // sheet
+      snack(
+          context,
+          sent
+              ? (draft
+                  ? tr('Chernovik saqlandi', 'Черновик сохранён')
+                  : tr('Zakaz saqlandi', 'Заказ сохранён'))
+              : tr('Zakaz navbatga saqlandi (sinxron qiling)',
+                  'Заказ в очереди (синхронизируйте)'));
+      Navigator.pop(context, true); // order screen
     }
   }
 }
