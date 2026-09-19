@@ -3665,7 +3665,43 @@ class _ProfileTabState extends State<ProfileTab> {
                       '${me['company_name'] ?? '-'}'),
                 ]),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              // Mening natijam: KPI + motivatsiya + tabel + jarima
+              Panel(
+                padding: EdgeInsets.zero,
+                onTap: () => Navigator.push(
+                    context, fadeRoute(const MyResultsScreen())),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                          color: brand.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(12)),
+                      child: const Icon(Icons.insert_chart, color: brand),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(tr('Mening natijam', 'Мои результаты'),
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w800, color: ink)),
+                          Text(
+                              tr('KPI · Motivatsiya · Tabel · Jarima',
+                                  'KPI · Мотивация · Табель · Штрафы'),
+                              style: const TextStyle(
+                                  color: muted, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right, color: muted),
+                  ]),
+                ),
+              ),
+              const SizedBox(height: 12),
               Panel(
                 child: Row(children: [
                   const Icon(Icons.language, color: brand),
@@ -4322,6 +4358,276 @@ class _VisitScreenState extends State<VisitScreen> {
         const Icon(Icons.chevron_right, color: muted),
       ]),
     );
+  }
+}
+
+// ============ MENING NATIJAM (KPI + motivatsiya + tabel + jarima) ============
+class MyResultsScreen extends StatefulWidget {
+  const MyResultsScreen({super.key});
+  @override
+  State<MyResultsScreen> createState() => _MyResultsScreenState();
+}
+
+class _MyResultsScreenState extends State<MyResultsScreen> {
+  Map? kpi; // dashboard row (self)
+  Map? tab; // tabel row (self)
+  List pen = [];
+  num penTotal = 0;
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final d = await Api.get('/api/kpi2/dashboard');
+      if ((d['rows'] as List).isNotEmpty) kpi = d['rows'][0];
+    } catch (_) {}
+    try {
+      final tb = await Api.get('/api/kpi2/tabel');
+      if ((tb['rows'] as List).isNotEmpty) tab = tb['rows'][0];
+    } catch (_) {}
+    try {
+      final p = await Api.get('/api/kpi2/penalties');
+      pen = p['items'] ?? [];
+      penTotal = asNum(p['total']);
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  Color _pctColor(num p) =>
+      p >= 90 ? ok : (p >= 70 ? warn : danger);
+
+  Widget _bar(num pct) {
+    final p = pct.clamp(0, 100) / 100;
+    return Container(
+      height: 8,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+          color: line, borderRadius: BorderRadius.circular(6)),
+      child: FractionallySizedBox(
+        alignment: Alignment.centerLeft,
+        widthFactor: p.toDouble(),
+        child: Container(
+          decoration: BoxDecoration(
+              color: _pctColor(pct), borderRadius: BorderRadius.circular(6)),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final motiv = asNum(kpi?['motivation_total']);
+    final net = asNum(kpi?['net_motivation'] ?? (motiv - penTotal));
+    return Scaffold(
+      body: loading
+          ? const ListShimmer()
+          : ListView(padding: EdgeInsets.zero, children: [
+              GradientHeader(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white)),
+                      Text(tr('Mening natijam', 'Мои результаты'),
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800)),
+                    ]),
+                    const SizedBox(height: 6),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: Row(children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(tr('Jami motivatsiya', 'Итого мотивация'),
+                                style: TextStyle(
+                                    color: Colors.white.withOpacity(0.85),
+                                    fontSize: 12)),
+                            Text(money(motiv),
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w900)),
+                          ],
+                        ),
+                        const Spacer(),
+                        if (penTotal > 0)
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(tr('Jarima', 'Штраф'),
+                                  style: TextStyle(
+                                      color: Colors.white.withOpacity(0.85),
+                                      fontSize: 12)),
+                              Text('− ${money(penTotal)}',
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800)),
+                            ],
+                          ),
+                      ]),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(12)),
+                      child: Row(children: [
+                        Text(tr('Qo‘lga tegadigan (net)', 'К выплате (нетто)'),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600)),
+                        const Spacer(),
+                        Text(money(net),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 16)),
+                      ]),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // TABEL
+                    if (tab != null) ...[
+                      SectionTitle(tr('Tabel (davomat)', 'Табель')),
+                      Panel(
+                        child: Column(children: [
+                          _tRow(tr('Ish kunlari', 'Раб. дней'),
+                              '${tab!['days']} / ${tab!['tabel_days'] ?? ''}'),
+                          const Divider(height: 18),
+                          _tRow(tr('Valid vizit', 'Валид. визиты'),
+                              '${tab!['valid_visits']} / ${tab!['total_visits']}'),
+                          const Divider(height: 18),
+                          _tRow(
+                              tr('Ish vaqti', 'Раб. время'),
+                              '${(asNum(tab!['work_minutes']) / 60).toStringAsFixed(1)} ${tr('soat', 'ч')}'),
+                          const Divider(height: 18),
+                          _tRow('${tab!['first_ts']} — ${tab!['last_ts']}',
+                              tr('birinchi — oxirgi', 'первый — последний'),
+                              muted: true),
+                          const Divider(height: 18),
+                          _tRow(tr('Oylik (fiksa)', 'Оклад'),
+                              money(asNum(tab!['oylik'])),
+                              green: true),
+                        ]),
+                      ),
+                      const SizedBox(height: 4),
+                    ],
+                    // KPI
+                    SectionTitle(tr('KPI va motivatsiya', 'KPI и мотивация')),
+                    ...((kpi?['kpis'] ?? []) as List).map((k) {
+                      final ach = asNum(k['achievement']);
+                      final salary = '${k['ktype']}' == 'salary';
+                      return Panel(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(children: [
+                              Expanded(
+                                  child: Text('${k['name']}',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          color: ink))),
+                              Text('${ach.toStringAsFixed(1)}%',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      color: _pctColor(ach))),
+                            ]),
+                            _bar(ach),
+                            Row(children: [
+                              Text(
+                                  salary
+                                      ? '${k['fakt']} ${tr('kun', 'дн')}'
+                                      : (('${k['ktype']}' == 'akb')
+                                          ? '${k['fakt']} / ${k['plan']}'
+                                          : '${money(asNum(k['fakt']))} / ${money(asNum(k['plan']))}'),
+                                  style: const TextStyle(
+                                      color: muted, fontSize: 12.5)),
+                              const Spacer(),
+                              Text(money(asNum(k['motivation'])),
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      color: asNum(k['motivation']) > 0
+                                          ? ok
+                                          : muted)),
+                            ]),
+                          ],
+                        ),
+                      );
+                    }),
+                    // JARIMA
+                    if (pen.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      SectionTitle(tr('Jarimalar', 'Штрафы')),
+                      ...pen.map((x) => Panel(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(children: [
+                              const Icon(Icons.remove_circle_outline,
+                                  color: danger, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Text('${x['reason'] ?? x['ptype']}',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w600)),
+                                    Text('${x['date']}',
+                                        style: const TextStyle(
+                                            color: muted, fontSize: 11.5)),
+                                  ],
+                                ),
+                              ),
+                              Text('− ${money(asNum(x['amount']))}',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      color: danger)),
+                            ]),
+                          )),
+                    ],
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            ]),
+    );
+  }
+
+  Widget _tRow(String a, String b, {bool green = false, bool muted = false}) {
+    return Row(children: [
+      Text(a,
+          style: TextStyle(
+              color: muted ? const Color(0xFF64748B) : ink,
+              fontWeight: muted ? FontWeight.w500 : FontWeight.w600,
+              fontSize: muted ? 12.5 : 14)),
+      const Spacer(),
+      Text(b,
+          style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: green ? ok : (muted ? const Color(0xFF64748B) : ink),
+              fontSize: muted ? 12.5 : 14)),
+    ]);
   }
 }
 
