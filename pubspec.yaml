@@ -1,7 +1,7 @@
 name: salesgo_agent
 description: SalesGO agent mobil ilova
 publish_to: 'none'
-version: 1.5.0+6
+version: 1.6.0+7
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
