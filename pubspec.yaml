@@ -1,7 +1,7 @@
 name: salesgo_agent
 description: SalesGO agent mobil ilova
 publish_to: 'none'
-version: 1.4.0+5
+version: 1.5.0+6
 
 environment:
   sdk: '>=3.1.0 <4.0.0'
@@ -17,6 +17,8 @@ dependencies:
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   url_launcher: ^6.2.5
+  share_plus: ^7.2.2
+  path_provider: ^2.1.2
 
 dev_dependencies:
   flutter_lints: ^3.0.1
