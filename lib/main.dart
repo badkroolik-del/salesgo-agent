@@ -13,41 +13,54 @@ void main() async {
   runApp(const SalesGoApp());
 }
 
+bool _bootedOnce = false;
+
 class SalesGoApp extends StatelessWidget {
   const SalesGoApp({super.key});
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String>(
       valueListenable: langVN,
-      builder: (_, __, ___) => MaterialApp(
+      builder: (_, l, __) => MaterialApp(
+        key: ValueKey('app_$l'),
         title: 'SalesGO',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
-        home: const SplashScreen(),
+        home: const Root(),
       ),
     );
   }
 }
 
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+/// Ildiz: birinchi ochilishda splash, keyin login yoki role-home.
+class Root extends StatefulWidget {
+  const Root({super.key});
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<Root> createState() => _RootState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _RootState extends State<Root> {
+  late bool showSplash = !_bootedOnce;
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 1900), () {
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        fadeRoute(Api.token == null ? const LoginScreen() : const Gate()),
-      );
-    });
+    if (!_bootedOnce) {
+      Timer(const Duration(milliseconds: 1800), () {
+        _bootedOnce = true;
+        if (mounted) setState(() => showSplash = false);
+      });
+    }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    if (showSplash) return const _Splash();
+    return Api.token == null ? const LoginScreen() : const Gate();
+  }
+}
+
+class _Splash extends StatelessWidget {
+  const _Splash();
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -57,10 +70,8 @@ class _SplashScreenState extends State<SplashScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const AnimatedLogo(size: 128),
-              const SizedBox(height: 22),
-              const Wordmark(size: 34, base: Colors.white),
-              const SizedBox(height: 8),
+              const AnimatedWordmark(size: 46, base: Colors.white),
+              const SizedBox(height: 12),
               Text(tr('Savdo — harakatda', 'Продажи — в движении'),
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.85),
@@ -71,8 +82,7 @@ class _SplashScreenState extends State<SplashScreen> {
                 height: 26,
                 width: 26,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2.4,
-                    color: Colors.white.withOpacity(0.9)),
+                    strokeWidth: 2.4, color: Colors.white.withOpacity(0.9)),
               ),
             ],
           ),
@@ -82,7 +92,7 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 }
 
-/// Login'dan keyin rolni aniqlab mos ekranga yo'naltiradi.
+/// me'ni yuklab rolga qarab ekran qaytaradi (navigatsiyasiz — til uchun).
 class Gate extends StatefulWidget {
   const Gate({super.key});
   @override
@@ -94,28 +104,26 @@ class _GateState extends State<Gate> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (Api.me == null) _load();
   }
 
   Future<void> _load() async {
     try {
       Api.me = Map<String, dynamic>.from(await Api.get('/auth/me'));
-      setState(() {});
+      if (mounted) setState(() {});
     } catch (e) {
       if (e == 'auth') {
         await Api.logout();
-        if (mounted) {
-          Navigator.pushReplacement(
-              context, fadeRoute(const LoginScreen()));
-        }
+        if (mounted) setState(() {});
       } else {
-        setState(() => err = '$e');
+        if (mounted) setState(() => err = '$e');
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (Api.token == null) return const LoginScreen();
     if (err != null) {
       return Scaffold(
         body: Center(
@@ -181,8 +189,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
     try {
       await Api.login(comp.text.trim(), login.text.trim(), pass.text);
+      Api.me = null;
       if (mounted) {
-        Navigator.pushReplacement(context, fadeRoute(const Gate()));
+        Navigator.pushReplacement(
+            context, MaterialPageRoute(builder: (_) => const Gate()));
       }
     } catch (e) {
       setState(() => err = '$e');
@@ -220,11 +230,9 @@ class _LoginScreenState extends State<LoginScreen> {
               padding: const EdgeInsets.all(22),
               child: Column(
                 children: [
-                  const SizedBox(height: 10),
-                  const AnimatedLogo(size: 92),
-                  const SizedBox(height: 14),
-                  const Wordmark(size: 30, base: Colors.white),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 12),
+                  const AnimatedWordmark(size: 40, base: Colors.white),
+                  const SizedBox(height: 24),
                   Container(
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
@@ -241,8 +249,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                 fontWeight: FontWeight.w800,
                                 color: ink)),
                         const SizedBox(height: 4),
-                        Text(tr('Hisobingiz bilan davom eting',
-                            'Продолжите с вашим аккаунтом'),
+                        Text(
+                            tr('Hisobingiz bilan davom eting',
+                                'Продолжите с вашим аккаунтом'),
                             style: const TextStyle(color: muted, fontSize: 13)),
                         const SizedBox(height: 18),
                         TextField(
@@ -314,8 +323,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text(tr('SalesGO · savdo agentlari uchun',
-                      'SalesGO · для торговых агентов'),
+                  Text(
+                      tr('SalesGO · savdo agentlari uchun',
+                          'SalesGO · для торговых агентов'),
                       style: TextStyle(
                           color: Colors.white.withOpacity(0.8), fontSize: 12)),
                 ],
