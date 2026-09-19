@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'theme.dart';
 
@@ -180,8 +181,8 @@ class Wordmark extends StatelessWidget {
   }
 }
 
-/// Animatsiyali "SalesGO" — "Sales" yaxlit rang, "GO" to'q sariq + yugurib
-/// o'tuvchi yorug'lik (shine). Saytdagi kabi. Ikonsiz.
+/// Animatsiyali "SalesGO" — "Sales" yaxlit rang, "GO" yashil gradient +
+/// yugurib o'tuvchi shine + hue-rotate (rang aylanadi). Saytdagi kabi.
 class AnimatedWordmark extends StatefulWidget {
   final double size;
   final Color base;
@@ -192,15 +193,38 @@ class AnimatedWordmark extends StatefulWidget {
 
 class _AnimatedWordmarkState extends State<AnimatedWordmark>
     with SingleTickerProviderStateMixin {
-  static const _orange = Color(0xFFF97316);
-  static const _amber = Color(0xFFFFC24B);
+  // Saytdagi (salesgo.uz) kabi: yashil gradient + flow (siljish) + hue-rotate
+  static const _g1 = Color(0xFF12994A); // yashil
+  static const _g2 = Color(0xFF7EF2A8); // och yashil
   late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 2200))
+      vsync: this, duration: const Duration(seconds: 16))
     ..repeat();
   @override
   void dispose() {
     _c.dispose();
     super.dispose();
+  }
+
+  // Hue-rotate matritsasi (rangni to'liq doira bo'ylab aylantiradi)
+  List<double> _hue(double deg) {
+    final rad = deg * math.pi / 180.0;
+    final c = math.cos(rad), s = math.sin(rad);
+    const lr = 0.213, lg = 0.715, lb = 0.072;
+    return <double>[
+      lr + c * (1 - lr) + s * (-lr),
+      lg + c * (-lg) + s * (-lg),
+      lb + c * (-lb) + s * (1 - lb),
+      0, 0,
+      lr + c * (-lr) + s * (0.143),
+      lg + c * (1 - lg) + s * (0.140),
+      lb + c * (-lb) + s * (-0.283),
+      0, 0,
+      lr + c * (-lr) + s * (-(1 - lr)),
+      lg + c * (-lg) + s * (lg),
+      lb + c * (1 - lb) + s * (lb),
+      0, 0,
+      0, 0, 0, 1, 0,
+    ];
   }
 
   @override
@@ -216,21 +240,24 @@ class _AnimatedWordmarkState extends State<AnimatedWordmark>
       children: [
         // Sales — yaxlit rang
         Text('Sales', style: st.copyWith(color: widget.base)),
-        // GO — doim to'q sariq, ustidan oq shine yuguradi
+        // GO — yashil gradient, oq shine yuguradi (flow), rang aylanadi (hue)
         AnimatedBuilder(
           animation: _c,
           builder: (_, __) {
-            final t = _c.value;
-            return ShaderMask(
-              blendMode: BlendMode.srcIn,
-              shaderCallback: (r) => LinearGradient(
-                begin: Alignment(-1.0 + t * 2.4, 0),
-                end: Alignment(-0.2 + t * 2.4, 0),
-                colors: const [_orange, Colors.white, _amber, _orange],
-                stops: const [0.0, 0.45, 0.6, 1.0],
-                tileMode: TileMode.clamp,
-              ).createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
-              child: Text('GO', style: st.copyWith(color: Colors.white)),
+            final t = _c.value; // 0..1 (16s)
+            final flow = (t * 16 / 3) % 1.0; // ~3s siljish
+            return ColorFiltered(
+              colorFilter: ColorFilter.matrix(_hue(t * 360)),
+              child: ShaderMask(
+                blendMode: BlendMode.srcIn,
+                shaderCallback: (r) => LinearGradient(
+                  begin: Alignment(-1.0 + flow * 2, 0),
+                  end: Alignment(1.0 + flow * 2, 0),
+                  colors: const [_g1, _g2, _g1],
+                  tileMode: TileMode.mirror,
+                ).createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
+                child: Text('GO', style: st.copyWith(color: Colors.white)),
+              ),
             );
           },
         ),
