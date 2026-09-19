@@ -84,31 +84,51 @@ class _AgentShellState extends State<AgentShell> {
     ];
     return Scaffold(
       body: IndexedStack(index: idx, children: tabs),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: idx,
-        onDestinationSelected: (i) => setState(() => idx = i),
-        destinations: [
-          NavigationDestination(
-              icon: const Icon(Icons.dashboard_outlined),
-              selectedIcon: const Icon(Icons.dashboard),
-              label: tr('Bosh', 'Главная')),
-          NavigationDestination(
-              icon: const Icon(Icons.storefront_outlined),
-              selectedIcon: const Icon(Icons.storefront),
-              label: tr('Mijozlar', 'Клиенты')),
-          NavigationDestination(
-              icon: const Icon(Icons.receipt_long_outlined),
-              selectedIcon: const Icon(Icons.receipt_long),
-              label: tr('Zakazlar', 'Заказы')),
-          NavigationDestination(
-              icon: const Icon(Icons.insert_chart_outlined),
-              selectedIcon: const Icon(Icons.insert_chart),
-              label: tr('Hisobot', 'Отчёт')),
-          NavigationDestination(
-              icon: const Icon(Icons.person_outline),
-              selectedIcon: const Icon(Icons.person),
-              label: tr('Profil', 'Профиль')),
-        ],
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+            gradient: brandGradient, boxShadow: softShadow),
+        child: NavigationBarTheme(
+          data: NavigationBarThemeData(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            indicatorColor: Colors.white.withOpacity(0.24),
+            labelTextStyle: MaterialStateProperty.all(const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w600)),
+            iconTheme: MaterialStateProperty.resolveWith((s) => IconThemeData(
+                color: s.contains(MaterialState.selected)
+                    ? Colors.white
+                    : Colors.white.withOpacity(0.7))),
+          ),
+          child: NavigationBar(
+            backgroundColor: Colors.transparent,
+            selectedIndex: idx,
+            onDestinationSelected: (i) => setState(() => idx = i),
+            destinations: [
+              NavigationDestination(
+                  icon: const Icon(Icons.dashboard_outlined),
+                  selectedIcon: const Icon(Icons.dashboard),
+                  label: tr('Bosh', 'Главная')),
+              NavigationDestination(
+                  icon: const Icon(Icons.storefront_outlined),
+                  selectedIcon: const Icon(Icons.storefront),
+                  label: tr('Mijozlar', 'Клиенты')),
+              NavigationDestination(
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  selectedIcon: const Icon(Icons.receipt_long),
+                  label: tr('Zakazlar', 'Заказы')),
+              NavigationDestination(
+                  icon: const Icon(Icons.insert_chart_outlined),
+                  selectedIcon: const Icon(Icons.insert_chart),
+                  label: tr('Hisobot', 'Отчёт')),
+              NavigationDestination(
+                  icon: const Icon(Icons.person_outline),
+                  selectedIcon: const Icon(Icons.person),
+                  label: tr('Profil', 'Профиль')),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -127,7 +147,9 @@ class _DashboardTabState extends State<DashboardTab> {
   bool loading = true;
   bool refreshing = false;
   num salesToday = 0, ordersToday = 0, routeToday = 0, debtors = 0;
+  num visitsToday = 0;
   List drafts = [];
+  List debtorList = [];
   List route = [];
   Set doneIds = {};
 
@@ -148,8 +170,19 @@ class _DashboardTabState extends State<DashboardTab> {
       ordersToday = asNum(o['count'] ?? items.length);
       route = (rt['items'] ?? []) as List;
       routeToday = route.length;
-      debtors = cl.where((x) => asNum(x['balance']) > 0).length;
+      // bugungi marshrutdagi qarzdor do'konlar (hammasi emas)
+      final routeIds = route.map((e) => e['id']).toSet();
+      debtorList = cl
+          .where((x) =>
+              asNum(x['balance']) > 0 && routeIds.contains(x['id']))
+          .toList()
+        ..sort((a, b) => asNum(b['balance']).compareTo(asNum(a['balance'])));
+      debtors = debtorList.length;
       doneIds = items.map((e) => e['client_id']).toSet();
+      try {
+        final k = await Api.get('/api/my-kpi');
+        visitsToday = asNum(k['visits_today']);
+      } catch (_) {}
       try {
         final dr = await Api.get('/api/orders?status=draft&limit=50');
         drafts = (dr['items'] ?? []) as List;
@@ -251,47 +284,66 @@ class _DashboardTabState extends State<DashboardTab> {
                 Row(children: [
                   Expanded(
                       child: StatCard(
+                          compact: true,
                           icon: Icons.payments,
-                          label: tr('Bugungi savdo', 'Продажа сегодня'),
+                          label: tr('Savdo', 'Продажа'),
                           value: salesToday,
                           isMoney: true,
                           color: brand)),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
                   Expanded(
                       child: StatCard(
+                          compact: true,
                           icon: Icons.receipt_long,
                           label: tr('Zakazlar', 'Заказы'),
                           value: ordersToday,
                           color: info)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: StatCard(
+                          compact: true,
+                          icon: Icons.route,
+                          label: tr('Do‘konlar', 'Точки'),
+                          value: routeToday,
+                          color: accent)),
                 ]),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Row(children: [
                   Expanded(
                       child: StatCard(
-                          icon: Icons.route,
-                          label: tr('Bugun do‘konlar', 'Точки сегодня'),
-                          value: routeToday,
-                          color: accent)),
-                  const SizedBox(width: 12),
+                          compact: true,
+                          icon: Icons.place,
+                          label: tr('Vizitlar', 'Визиты'),
+                          value: visitsToday,
+                          color: violet)),
+                  const SizedBox(width: 10),
                   Expanded(
                       child: StatCard(
+                          compact: true,
                           icon: Icons.error_outline,
-                          label: tr('Qarzdorlar', 'Должники'),
+                          label: tr('Qarzdor', 'Должники'),
                           value: debtors,
                           color: danger,
-                          onTap: () => Navigator.push(context,
-                              fadeRoute(const DebtorsScreen())))),
+                          onTap: () => Navigator.push(
+                              context,
+                              fadeRoute(DebtorsScreen(clients: debtorList))))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: StatCard(
+                          compact: true,
+                          icon: Icons.drafts_outlined,
+                          label: tr('Chernovik', 'Черновики'),
+                          value: drafts.length,
+                          color: warn,
+                          onTap: () async {
+                            await Navigator.push(context,
+                                fadeRoute(const ChernovikScreen()));
+                            _load();
+                          })),
                 ]),
                 const SizedBox(height: 16),
                 // KATTA sinxron tugmasi — bosilsa server bilan sinxron
                 _BigSyncButton(onDone: _load),
-                if (drafts.isNotEmpty) ...[
-                  SectionTitle(tr('Chernovik zakazlar', 'Черновики заказов')),
-                  ...drafts.map((o) => Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: OrderTile(o),
-                      )),
-                ],
                 SectionTitle(tr('Bugungi marshrut', 'Маршрут на сегодня')),
                 if (loading)
                   const Column(children: [
@@ -326,7 +378,7 @@ class _DashboardTabState extends State<DashboardTab> {
   }
 }
 
-// KATTA sinxron tugmasi: bosilganda navbatdagi zakaz/rasmlarni serverga
+// KATTA sinxron tugmasi: uzun bosilganda navbatdagi zakaz/rasmlarni serverga
 // yuboradi va jarayonni (nechta zakaz / nechta rasm) ko'rsatadi.
 class _BigSyncButton extends StatefulWidget {
   final Future<void> Function() onDone;
@@ -340,7 +392,7 @@ class _BigSyncButtonState extends State<_BigSyncButton>
   late final AnimationController _c = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 900));
   bool syncing = false;
-  int done = 0, total = 0, sentO = 0, sentP = 0, pending = 0;
+  int done = 0, total = 0, sentO = 0, sentP = 0, pending = 0, po = 0, pp = 0;
 
   @override
   void initState() {
@@ -355,8 +407,15 @@ class _BigSyncButtonState extends State<_BigSyncButton>
   }
 
   Future<void> _refreshPending() async {
-    final p = await SyncStore.pendingTotal();
-    if (mounted) setState(() => pending = p);
+    final o = await SyncStore.pendingOrders();
+    final p = await SyncStore.pendingPhotos();
+    if (mounted) {
+      setState(() {
+        po = o;
+        pp = p;
+        pending = o + p;
+      });
+    }
   }
 
   Future<void> _startSync() async {
@@ -462,14 +521,18 @@ class _BigSyncButtonState extends State<_BigSyncButton>
                     mainAxisAlignment: MainAxisAlignment.center,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                          pending > 0
-                              ? '${tr('Sinxronlash', 'Синхронизация')}  ·  $pending'
-                              : tr('Sinxronlash', 'Синхронизация'),
+                      Text(tr('Sinxronlash', 'Синхронизация'),
                           style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
                               fontSize: 16.5)),
+                      if (pending > 0)
+                        Text(
+                            '${tr('Zakaz', 'Заказы')}: $po · ${tr('Rasm', 'Фото')}: $pp',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.9),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ],
@@ -526,7 +589,8 @@ class _RouteTile extends StatelessWidget {
 }
 
 class DebtorsScreen extends StatefulWidget {
-  const DebtorsScreen({super.key});
+  final List? clients; // berilgan bo'lsa (bugungi marshrut qarzdorlari)
+  const DebtorsScreen({super.key, this.clients});
   @override
   State<DebtorsScreen> createState() => _DebtorsScreenState();
 }
@@ -537,7 +601,12 @@ class _DebtorsScreenState extends State<DebtorsScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    if (widget.clients != null) {
+      items = widget.clients!;
+      loading = false;
+    } else {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -683,28 +752,47 @@ Color statusColor(String s) {
 class OrderTile extends StatelessWidget {
   final Map o;
   final VoidCallback? onTap;
-  const OrderTile(this.o, {super.key, this.onTap});
+  final bool history; // mijoz tarixida: sana + receipt ikon (client_name yo'q)
+  const OrderTile(this.o, {super.key, this.onTap, this.history = false});
   @override
   Widget build(BuildContext context) {
     final status = '${o['status'] ?? 'new'}';
+    final dateRaw = '${o['created_at'] ?? o['delivery_date'] ?? ''}';
+    final date = dateRaw.length >= 10 ? dateRaw.substring(0, 10) : dateRaw;
+    final title =
+        history ? (date.isNotEmpty ? date : '#${o['id']}') : '${o['client_name'] ?? tr('Mijoz', 'Клиент')}';
     return Panel(
       padding: const EdgeInsets.all(12),
       onTap: onTap,
       child: Row(
         children: [
-          Avatar('${o['client_name'] ?? '?'}', size: 42),
+          history
+              ? Container(
+                  width: 42,
+                  height: 42,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                      color: statusColor(status).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12)),
+                  child: Icon(Icons.receipt_long,
+                      color: statusColor(status), size: 20),
+                )
+              : Avatar('${o['client_name'] ?? '?'}', size: 42),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${o['client_name'] ?? tr('Mijoz', 'Клиент')}',
+                Text(title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontWeight: FontWeight.w700, color: ink)),
                 const SizedBox(height: 2),
-                Text('#${o['id']} · ${payLabel('${o['pay_type']}')}',
+                Text(
+                    history
+                        ? '#${o['id']} · ${payLabel('${o['pay_type']}')}'
+                        : '#${o['id']} · ${payLabel('${o['pay_type']}')}',
                     style: const TextStyle(color: muted, fontSize: 12)),
               ],
             ),
@@ -1057,6 +1145,55 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
     }
   }
 
+  // Rasmni to'liq ochish + "Изменить"
+  Future<void> _openPhoto(String url) async {
+    final has = url.isNotEmpty && url != 'null';
+    final edit = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            actions: [
+              TextButton.icon(
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.camera_alt, color: Colors.white),
+                label: Text(tr('Изменить', 'Изменить'),
+                    style: const TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+          body: Center(
+            child: has
+                ? InteractiveViewer(
+                    child: Image.network('${Api.base}$url',
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const Icon(
+                            Icons.broken_image,
+                            color: Colors.white54,
+                            size: 60)))
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.image_outlined,
+                          color: Colors.white54, size: 70),
+                      const SizedBox(height: 12),
+                      Text(tr('Rasm yo‘q — qo‘shish uchun «Изменить»',
+                          'Нет фото — нажмите «Изменить»'),
+                          style: const TextStyle(color: Colors.white70)),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
+    if (edit == true) _editPhoto();
+  }
+
   void _infoSheet(Map c) {
     showModalBottomSheet(
       context: context,
@@ -1269,33 +1406,16 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   child: Row(children: [
                     GestureDetector(
-                      onTap: photoBusy ? null : _editPhoto,
-                      child: Stack(children: [
-                        (photo != null && '$photo'.isNotEmpty)
-                            ? ClipOval(
-                                child: Image.network('${Api.base}$photo',
-                                    width: 54,
-                                    height: 54,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) =>
-                                        Avatar('${c['name'] ?? '?'}', size: 54)))
-                            : Avatar('${c['name'] ?? '?'}', size: 54),
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: brand, width: 1)),
-                            child: Icon(
-                                photoBusy ? Icons.hourglass_bottom : Icons.camera_alt,
-                                size: 12,
-                                color: brand),
-                          ),
-                        ),
-                      ]),
+                      onTap: () => _openPhoto('$photo'),
+                      child: (photo != null && '$photo'.isNotEmpty)
+                          ? ClipOval(
+                              child: Image.network('${Api.base}$photo',
+                                  width: 54,
+                                  height: 54,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) =>
+                                      Avatar('${c['name'] ?? '?'}', size: 54)))
+                          : Avatar('${c['name'] ?? '?'}', size: 54),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -1346,18 +1466,8 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                               fadeRoute(ClientOrdersScreen(
                                   clientId: _id, name: '${c['name']}'))))),
                 ]),
-                if (weekdays.isNotEmpty) ...[
-                  SectionTitle(tr('Tashrif kunlari', 'Дни визитов')),
-                  Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: weekdays
-                          .map<Widget>((w) => Pill(weekdayName(asNum(w).toInt()),
-                              color: brand, icon: Icons.event))
-                          .toList()),
-                ],
-                // Amallar: ma'lumot (i) + akt-sverka
-                const SizedBox(height: 14),
+                // Amallar: ma'lumot (i) + akt-sverka (do'kon nomi ostida)
+                const SizedBox(height: 12),
                 Row(children: [
                   Expanded(
                     child: OutlinedButton.icon(
@@ -1379,30 +1489,6 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                     ),
                   ),
                 ]),
-                // Do'kon rasmi (o'zgartirsa bo'ladi)
-                SectionTitle(tr('Do‘kon rasmi', 'Фото точки'),
-                    trailing: TextButton.icon(
-                        onPressed: photoBusy ? null : _editPhoto,
-                        icon: photoBusy
-                            ? const SizedBox(
-                                height: 14,
-                                width: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.camera_alt, size: 18),
-                        label: Text(tr('O‘zgartirish', 'Изменить')))),
-                GestureDetector(
-                  onTap: photoBusy ? null : _editPhoto,
-                  child: (photo != null && '$photo'.isNotEmpty)
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Image.network('${Api.base}$photo',
-                              height: 180,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => _photoPh()),
-                        )
-                      : _photoPh(),
-                ),
                 // Do'kon istoriyasi (oxirgi zakazlar)
                 SectionTitle(tr('Do‘kon tarixi', 'История точки'),
                     trailing: orders.length > 3
@@ -1421,6 +1507,7 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
                   ...orders.take(3).map((o) => Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: OrderTile(o,
+                            history: true,
                             onTap: () => Navigator.push(
                                 context,
                                 fadeRoute(NakladnoyScreen(
@@ -1641,6 +1728,7 @@ class _ClientOrdersScreenState extends State<ClientOrdersScreen> {
                       itemCount: list.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (_, i) => OrderTile(list[i],
+                          history: true,
                           onTap: () => Navigator.push(
                               context,
                               fadeRoute(NakladnoyScreen(
@@ -1717,32 +1805,73 @@ class _NakladnoyScreenState extends State<NakladnoyScreen> {
     }
   }
 
+  Future<void> _finalize(String action) async {
+    try {
+      await Api.post(
+          '/api/orders/${widget.orderId}/finalize?action=$action', {});
+      if (mounted) {
+        snack(
+            context,
+            action == 'confirm'
+                ? tr('Zakaz yakunlandi', 'Заказ оформлен')
+                : tr('Chernovik bekor qilindi', 'Черновик отменён'));
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      if (mounted) snack(context, '$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final st = '${order['status'] ?? ''}';
+    final isDraft = st == 'draft';
     return Scaffold(
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: Row(children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: loading ? null : _share,
-                icon: const Icon(Icons.ios_share),
-                label: Text(tr('Ulashish', 'Поделиться')),
-                style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14)),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: GradientButton(
-                text: 'Excel',
-                icon: Icons.table_view,
-                onTap: loading ? null : _share,
-              ),
-            ),
-          ]),
+          child: isDraft
+              ? Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: loading ? null : () => _finalize('cancel'),
+                      icon: const Icon(Icons.close, color: danger),
+                      label: Text(tr('Bekor', 'Отменить'),
+                          style: const TextStyle(color: danger)),
+                      style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: danger),
+                          padding: const EdgeInsets.symmetric(vertical: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: GradientButton(
+                      text: tr('Zakazni yakunlash', 'Оформить заказ'),
+                      icon: Icons.check,
+                      onTap: loading ? null : () => _finalize('confirm'),
+                    ),
+                  ),
+                ])
+              : Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: loading ? null : _share,
+                      icon: const Icon(Icons.ios_share),
+                      label: Text(tr('Ulashish', 'Поделиться')),
+                      style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: GradientButton(
+                      text: 'Excel',
+                      icon: Icons.table_view,
+                      onTap: loading ? null : _share,
+                    ),
+                  ),
+                ]),
         ),
       ),
       body: ListView(
@@ -1832,6 +1961,81 @@ class _NakladnoyScreenState extends State<NakladnoyScreen> {
             ),
         ],
       ),
+    );
+  }
+}
+
+// ================= CHERNOVIK (draft) ZAKAZLAR =================
+class ChernovikScreen extends StatefulWidget {
+  const ChernovikScreen({super.key});
+  @override
+  State<ChernovikScreen> createState() => _ChernovikScreenState();
+}
+
+class _ChernovikScreenState extends State<ChernovikScreen> {
+  List items = [];
+  bool loading = true;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => loading = true);
+    try {
+      final d = await Api.get('/api/orders?status=draft&limit=200');
+      items = (d['items'] ?? []) as List;
+    } catch (_) {}
+    if (mounted) setState(() => loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Column(children: [
+        GradientHeader(
+          padding: const EdgeInsets.fromLTRB(8, 4, 18, 20),
+          child: Row(children: [
+            IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back, color: Colors.white)),
+            Expanded(
+              child: Text(tr('Chernovik zakazlar', 'Черновики заказов'),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800)),
+            ),
+          ]),
+        ),
+        Expanded(
+          child: loading
+              ? const ListShimmer()
+              : items.isEmpty
+                  ? EmptyState(
+                      icon: Icons.drafts_outlined,
+                      text: tr('Chernovik yo‘q', 'Черновиков нет'))
+                  : RefreshIndicator(
+                      color: brand,
+                      onRefresh: _load,
+                      child: ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) => OrderTile(items[i], onTap: () async {
+                          await Navigator.push(
+                              context,
+                              fadeRoute(NakladnoyScreen(
+                                  orderId: items[i]['id'] as int,
+                                  clientName:
+                                      '${items[i]['client_name'] ?? ''}')));
+                          _load();
+                        }),
+                      ),
+                    ),
+        ),
+      ]),
     );
   }
 }
@@ -2450,31 +2654,73 @@ class OrdersTab extends StatefulWidget {
 class _OrdersTabState extends State<OrdersTab> {
   List all = [];
   bool loading = true;
+  bool loadingMore = false;
+  bool hasMore = true;
+  int offset = 0;
+  static const _page = 40;
   String status = '';
+  final _scroll = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_onScroll);
     _load();
   }
 
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (!hasMore || loadingMore || loading) return;
+    if (_scroll.position.pixels >=
+        _scroll.position.maxScrollExtent - 300) {
+      _loadMore();
+    }
+  }
+
+  String _path() {
+    final st = status.isEmpty ? '' : '&status=$status';
+    return '/api/orders?limit=$_page&offset=$offset$st';
+  }
+
   Future<void> _load() async {
-    setState(() => loading = true);
+    setState(() {
+      loading = true;
+      offset = 0;
+      hasMore = true;
+    });
     try {
-      final path = status.isEmpty
-          ? '/api/orders?limit=200'
-          : '/api/orders?status=$status&limit=200';
-      final d = await Api.get(path);
-      all = d['items'] ?? [];
+      final d = await Api.get(_path());
+      final items = (d['items'] ?? []) as List;
+      all = items;
+      offset = items.length;
+      hasMore = items.length >= _page;
     } catch (_) {}
     if (mounted) setState(() => loading = false);
+  }
+
+  Future<void> _loadMore() async {
+    setState(() => loadingMore = true);
+    try {
+      final d = await Api.get(_path());
+      final items = (d['items'] ?? []) as List;
+      all = [...all, ...items];
+      offset += items.length;
+      hasMore = items.length >= _page;
+    } catch (_) {}
+    if (mounted) setState(() => loadingMore = false);
   }
 
   void _openOrder(Map o) {
     Navigator.push(
         context,
         fadeRoute(NakladnoyScreen(
-            orderId: o['id'] as int, clientName: '${o['client_name'] ?? ''}')));
+            orderId: o['id'] as int,
+            clientName: '${o['client_name'] ?? ''}')));
   }
 
   @override
@@ -2515,12 +2761,26 @@ class _OrdersTabState extends State<OrdersTab> {
                       color: brand,
                       onRefresh: _load,
                       child: ListView.separated(
+                        controller: _scroll,
                         padding: const EdgeInsets.all(16),
-                        itemCount: all.length,
+                        itemCount: all.length + (hasMore ? 1 : 0),
                         separatorBuilder: (_, __) =>
                             const SizedBox(height: 10),
-                        itemBuilder: (_, i) =>
-                            OrderTile(all[i], onTap: () => _openOrder(all[i])),
+                        itemBuilder: (_, i) {
+                          if (i >= all.length) {
+                            return const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Center(
+                                  child: SizedBox(
+                                      height: 24,
+                                      width: 24,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: brand))),
+                            );
+                          }
+                          return OrderTile(all[i],
+                              onTap: () => _openOrder(all[i]));
+                        },
                       ),
                     ),
         ),
@@ -2710,7 +2970,8 @@ class _AgentReportsTabState extends State<AgentReportsTab> {
                                 context,
                                 fadeRoute(NakladnoyScreen(
                                     orderId: o['id'] as int,
-                                    clientName: '${o['client_name'] ?? ''}')))),
+                                    clientName:
+                                        '${o['client_name'] ?? ''}')))),
                       )),
               ],
             ),
@@ -2956,7 +3217,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 },
               ),
               const SizedBox(height: 14),
-              const Text('SalesGO v1.5',
+              const Text('SalesGO v1.6',
                   style: TextStyle(color: muted, fontSize: 12)),
             ],
           ),
@@ -2983,17 +3244,36 @@ class _ProfileTabState extends State<ProfileTab> {
     );
   }
 
-  Widget _row(IconData ic, String k, String v) => Row(children: [
-        Icon(ic, size: 18, color: muted),
-        const SizedBox(width: 10),
-        Text(k, style: const TextStyle(color: muted, fontSize: 13)),
-        const Spacer(),
-        Flexible(
-            child: Text(v,
-                textAlign: TextAlign.right,
-                style:
-                    const TextStyle(fontWeight: FontWeight.w600, color: ink))),
-      ]);
+  Widget _row(IconData ic, String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: brand.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(ic, size: 18, color: brand),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(k,
+                    style: const TextStyle(color: muted, fontSize: 12)),
+                const SizedBox(height: 1),
+                Text(v,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: ink,
+                        fontSize: 14.5)),
+              ],
+            ),
+          ),
+        ]),
+      );
 }
 
 String roleLabel(String r) {
@@ -3180,6 +3460,38 @@ class _VisitScreenState extends State<VisitScreen> {
       final cm = Uri.encodeComponent(comment.text.trim());
       await Api.post(
           '/api/visits/$visitId/checkout?result=$result&comment=$cm', {});
+      if (!mounted) return;
+      final rl = result == 'order'
+          ? tr('Zakaz bilan', 'С заказом')
+          : result == 'closed'
+              ? tr('Yopiq', 'Закрыто')
+              : tr('Zakazsiz', 'Без заказа');
+      await showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          icon: const Icon(Icons.check_circle, color: ok, size: 42),
+          title: Text(tr('Vizit yakunlandi', 'Визит завершён'),
+              textAlign: TextAlign.center),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${tr('Natija', 'Результат')}: $rl',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                  '${tr('Foto', 'Фото')}: ${beforeCount + afterCount}  ·  До: $beforeCount / После: $afterCount',
+                  style: const TextStyle(color: muted, fontSize: 12.5)),
+            ],
+          ),
+          actions: [
+            Center(
+              child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK')),
+            )
+          ],
+        ),
+      );
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) snack(context, '$e');
@@ -3591,17 +3903,53 @@ class _OrderScreenState extends State<OrderScreen> {
       IconButton(
           onPressed: () => onCh(val - 1),
           icon: const Icon(Icons.remove_circle_outline, color: danger)),
-      SizedBox(
-        width: 40,
-        child: Text('$val',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                fontWeight: FontWeight.w900, fontSize: 18)),
+      InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _askQty(val, onCh),
+        child: Container(
+          width: 54,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+              border: Border.all(color: line),
+              borderRadius: BorderRadius.circular(8)),
+          child: Text('$val',
+              textAlign: TextAlign.center,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+        ),
       ),
       IconButton(
           onPressed: () => onCh(val + 1),
           icon: const Icon(Icons.add_circle, color: brand)),
     ]);
+  }
+
+  Future<void> _askQty(int cur, void Function(int) onCh) async {
+    final c = TextEditingController(text: cur > 0 ? '$cur' : '');
+    final r = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr('Sonini kiriting', 'Введите количество')),
+        content: TextField(
+          controller: c,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '0'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(tr('Bekor', 'Отмена'))),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: brand),
+              onPressed: () =>
+                  Navigator.pop(ctx, int.tryParse(c.text.trim()) ?? cur),
+              child: Text(tr('OK', 'OK'))),
+        ],
+      ),
+    );
+    if (r != null) onCh(r < 0 ? 0 : r);
   }
 
   Widget _prodImage(Map p, double size) {
@@ -3844,21 +4192,79 @@ class _OrderScreenState extends State<OrderScreen> {
                         fontSize: 18, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 12),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 260),
+                  constraints: const BoxConstraints(maxHeight: 300),
                   child: ListView(
                     shrinkWrap: true,
                     children: cart.values.map((e) {
                       final p = e['product'];
                       final qd = e['qty'] as int;
+                      final id = p['id'] as int;
+                      final price = asNum(p['price']);
                       return Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: 6),
                         child: Row(children: [
                           Expanded(
-                              child: Text('${p['name']}',
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${p['name']}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w600)),
+                                Text('${money(price * qd)}',
+                                    style: const TextStyle(
+                                        color: brand,
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                setState(() {
+                                  final nv = qd - 1;
+                                  if (nv <= 0) {
+                                    cart.remove(id);
+                                  } else {
+                                    cart[id]!['qty'] = nv;
+                                  }
+                                });
+                                if (cart.isEmpty) {
+                                  Navigator.pop(ctx);
+                                } else {
+                                  setSheet(() {});
+                                }
+                              },
+                              icon: const Icon(Icons.remove_circle_outline,
+                                  color: danger, size: 22)),
+                          SizedBox(
+                              width: 28,
+                              child: Text('$qd',
+                                  textAlign: TextAlign.center,
                                   style: const TextStyle(
-                                      fontWeight: FontWeight.w600))),
-                          Text('$qd ${p['unit'] ?? ''} × ${money(asNum(p['price']))}',
-                              style: const TextStyle(color: muted, fontSize: 12.5)),
+                                      fontWeight: FontWeight.w800))),
+                          IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                setState(() => cart[id]!['qty'] = qd + 1);
+                                setSheet(() {});
+                              },
+                              icon: const Icon(Icons.add_circle,
+                                  color: brand, size: 22)),
+                          IconButton(
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                setState(() => cart.remove(id));
+                                if (cart.isEmpty) {
+                                  Navigator.pop(ctx);
+                                } else {
+                                  setSheet(() {});
+                                }
+                              },
+                              icon: const Icon(Icons.delete_outline,
+                                  color: muted, size: 20)),
                         ]),
                       );
                     }).toList(),
