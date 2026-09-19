@@ -9,6 +9,7 @@ import 'roles.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Api.loadToken();
+  await loadLang();
   runApp(const SalesGoApp());
 }
 
@@ -16,11 +17,14 @@ class SalesGoApp extends StatelessWidget {
   const SalesGoApp({super.key});
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'SalesGO',
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
-      home: const SplashScreen(),
+    return ValueListenableBuilder<String>(
+      valueListenable: langVN,
+      builder: (_, __, ___) => MaterialApp(
+        title: 'SalesGO',
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: const SplashScreen(),
+      ),
     );
   }
 }
@@ -57,7 +61,7 @@ class _SplashScreenState extends State<SplashScreen> {
               const SizedBox(height: 22),
               const Wordmark(size: 34, base: Colors.white),
               const SizedBox(height: 8),
-              Text('Savdo — harakatda',
+              Text(tr('Savdo — harakatda', 'Продажи — в движении'),
                   style: TextStyle(
                       color: Colors.white.withOpacity(0.85),
                       fontWeight: FontWeight.w500,
@@ -122,7 +126,7 @@ class _GateState extends State<Gate> {
               children: [
                 const Icon(Icons.cloud_off, size: 48, color: muted),
                 const SizedBox(height: 12),
-                Text('Ulanishda xato:\n$err',
+                Text('${tr('Ulanishda xato', 'Ошибка подключения')}:\n$err',
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: muted)),
                 const SizedBox(height: 16),
@@ -131,7 +135,7 @@ class _GateState extends State<Gate> {
                       setState(() => err = null);
                       _load();
                     },
-                    child: const Text('Qayta urinish')),
+                    child: Text(tr('Qayta urinish', 'Повторить'))),
               ],
             ),
           ),
@@ -187,6 +191,24 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Widget _lang(String code, String label) {
+    final sel = lang == code;
+    return GestureDetector(
+      onTap: () => setLang(code),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: BoxDecoration(
+            color: sel ? brand : const Color(0xFFF1F5F9),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: sel ? brand : line)),
+        child: Text(label,
+            style: TextStyle(
+                color: sel ? Colors.white : muted,
+                fontWeight: FontWeight.w800)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -213,28 +235,29 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        const Text('Tizimga kirish',
-                            style: TextStyle(
+                        Text(tr('Tizimga kirish', 'Вход в систему'),
+                            style: const TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
                                 color: ink)),
                         const SizedBox(height: 4),
-                        const Text('Hisobingiz bilan davom eting',
-                            style: TextStyle(color: muted, fontSize: 13)),
+                        Text(tr('Hisobingiz bilan davom eting',
+                            'Продолжите с вашим аккаунтом'),
+                            style: const TextStyle(color: muted, fontSize: 13)),
                         const SizedBox(height: 18),
                         TextField(
                           controller: comp,
-                          decoration: const InputDecoration(
-                            labelText: 'Kompaniya kodi',
-                            prefixIcon: Icon(Icons.business_outlined),
+                          decoration: InputDecoration(
+                            labelText: tr('Kompaniya kodi', 'Код компании'),
+                            prefixIcon: const Icon(Icons.business_outlined),
                           ),
                         ),
                         const SizedBox(height: 12),
                         TextField(
                           controller: login,
-                          decoration: const InputDecoration(
-                            labelText: 'Login',
-                            prefixIcon: Icon(Icons.person_outline),
+                          decoration: InputDecoration(
+                            labelText: tr('Login', 'Логин'),
+                            prefixIcon: const Icon(Icons.person_outline),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -243,7 +266,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           obscureText: hide,
                           onSubmitted: (_) => busy ? null : _login(),
                           decoration: InputDecoration(
-                            labelText: 'Parol',
+                            labelText: tr('Parol', 'Пароль'),
                             prefixIcon: const Icon(Icons.lock_outline),
                             suffixIcon: IconButton(
                               icon: Icon(hide
@@ -273,16 +296,26 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                         const SizedBox(height: 18),
                         GradientButton(
-                          text: 'Kirish',
+                          text: tr('Kirish', 'Войти'),
                           icon: Icons.login,
                           busy: busy,
                           onTap: _login,
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _lang('uz', 'UZ'),
+                            const SizedBox(width: 8),
+                            _lang('ru', 'RU'),
+                          ],
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 16),
-                  Text('SalesGO · savdo agentlari uchun',
+                  Text(tr('SalesGO · savdo agentlari uchun',
+                      'SalesGO · для торговых агентов'),
                       style: TextStyle(
                           color: Colors.white.withOpacity(0.8), fontSize: 12)),
                 ],
