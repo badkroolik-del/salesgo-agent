@@ -2214,8 +2214,8 @@ class _NakladnoyScreenState extends State<NakladnoyScreen> {
   Future<void> _share() async {
     final id = order['id'];
     try {
-      // Serverда yasalgan rasmiy .xlsx nakladnoy (chegaralar bilan)
-      final bytes = await Api.getBytes('/api/orders/$id/nakladnoy');
+      // Serverда yasalgan rasmiy .xlsx nakladnoy (tanlangan til bilan)
+      final bytes = await Api.getBytes('/api/orders/$id/nakladnoy?lang=$lang');
       await shareBytes('nakladnoy_$id.xlsx', bytes,
           subject: 'Nakladnoy #$id',
           text: '${widget.clientName} · ${money(asNum(order['total']))}');
@@ -2594,8 +2594,9 @@ class _ReconcileScreenState extends State<ReconcileScreen> {
       qp = '?d1=$d1&d2=$d2';
     }
     try {
-      // Serverда yasalgan rasmiy .xlsx akt-sverka (chegaralar bilan)
-      final bytes = await Api.getBytes('/api/reconcile/$id/xlsx$qp');
+      // Serverда yasalgan rasmiy .xlsx akt-sverka (tanlangan til bilan)
+      final sep = qp.isEmpty ? '?' : '&';
+      final bytes = await Api.getBytes('/api/reconcile/$id/xlsx$qp${sep}lang=$lang');
       await shareBytes('akt_sverka_$id.xlsx', bytes,
           subject: '${tr('Akt-sverka', 'Акт-сверка')} — ${widget.name}');
     } catch (_) {
