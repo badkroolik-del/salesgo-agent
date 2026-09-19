@@ -2,9 +2,21 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'theme.dart';
 import 'ui.dart';
+import 'maps.dart';
 import 'main.dart';
 
-Widget _header(BuildContext context, String title, String subtitle) {
+Future<void> _openMap(BuildContext context) async {
+  try {
+    final d = await Api.get('/api/clients?limit=500');
+    if (context.mounted) {
+      Navigator.push(context,
+          fadeRoute(ClientsMapScreen(clients: (d['items'] ?? []) as List)));
+    }
+  } catch (_) {}
+}
+
+Widget _header(BuildContext context, String title, String subtitle,
+    {bool map = true}) {
   return GradientHeader(
     child: Row(
       children: [
@@ -12,7 +24,7 @@ Widget _header(BuildContext context, String title, String subtitle) {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Wordmark(size: 20, base: Colors.white),
+              const AnimatedWordmark(size: 20, base: Colors.white),
               const SizedBox(height: 10),
               Text(title,
                   style: const TextStyle(
@@ -25,6 +37,11 @@ Widget _header(BuildContext context, String title, String subtitle) {
             ],
           ),
         ),
+        if (map)
+          IconButton(
+            onPressed: () => _openMap(context),
+            icon: const Icon(Icons.map, color: Colors.white),
+          ),
         IconButton(
           onPressed: () async {
             await Api.logout();
@@ -84,21 +101,22 @@ class _DeliveryHomeState extends State<DeliveryHome> {
     return Scaffold(
       body: Column(
         children: [
-          _header(context, 'Yetkazish', '${orders.length} ta zakaz kutmoqda'),
+          _header(context, tr('Yetkazish', 'Доставка'),
+              '${orders.length} ${tr('ta zakaz kutmoqda', 'заказ(ов) ожидает')}'),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Row(children: [
               Expanded(
                   child: StatCard(
                       icon: Icons.local_shipping,
-                      label: 'Yetkaziladigan',
+                      label: tr('Yetkaziladigan', 'К доставке'),
                       value: orders.length,
                       color: info)),
               const SizedBox(width: 12),
               Expanded(
                   child: StatCard(
                       icon: Icons.payments,
-                      label: 'Summa',
+                      label: tr('Summa', 'Сумма'),
                       value: total,
                       isMoney: true,
                       color: brand)),
@@ -108,9 +126,9 @@ class _DeliveryHomeState extends State<DeliveryHome> {
             child: loading
                 ? const ListShimmer()
                 : orders.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         icon: Icons.local_shipping_outlined,
-                        text: 'Yetkazadigan zakaz yo‘q')
+                        text: tr('Yetkazadigan zakaz yo‘q', 'Нет заказов для доставки'))
                     : RefreshIndicator(
                         color: brand,
                         onRefresh: _load,
@@ -131,7 +149,7 @@ class _DeliveryHomeState extends State<DeliveryHome> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      Text('${o['client_name'] ?? 'Mijoz'}',
+                                      Text('${o['client_name'] ?? tr('Mijoz', 'Клиент')}',
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
@@ -147,7 +165,7 @@ class _DeliveryHomeState extends State<DeliveryHome> {
                                 ),
                                 FilledButton(
                                     onPressed: () => _deliver(o['id']),
-                                    child: const Text('Yetkazdim')),
+                                    child: Text(tr('Yetkazdim', 'Доставил'))),
                               ]),
                             );
                           },
@@ -181,9 +199,8 @@ class _CollectorHomeState extends State<CollectorHome> {
     setState(() => loading = true);
     try {
       final d = await Api.get('/api/balances');
-      items = (d['items'] ?? [])
-          .where((x) => asNum(x['balance']) > 0)
-          .toList();
+      items =
+          (d['items'] ?? []).where((x) => asNum(x['balance']) > 0).toList();
     } catch (_) {}
     if (mounted) setState(() => loading = false);
   }
@@ -193,21 +210,20 @@ class _CollectorHomeState extends State<CollectorHome> {
     final okr = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: Text('${c['name']}'),
         content: TextField(
           controller: ctrl,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Summa'),
+          decoration: InputDecoration(labelText: tr('Summa', 'Сумма')),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Bekor')),
+              child: Text(tr('Bekor', 'Отмена'))),
           FilledButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Qabul')),
+              child: Text(tr('Qabul', 'Принять'))),
         ],
       ),
     );
@@ -230,21 +246,22 @@ class _CollectorHomeState extends State<CollectorHome> {
     return Scaffold(
       body: Column(
         children: [
-          _header(context, 'Inkassator', '${items.length} ta qarzdor'),
+          _header(context, tr('Inkassator', 'Инкассатор'),
+              '${items.length} ${tr('ta qarzdor', 'должник(ов)')}'),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             child: Row(children: [
               Expanded(
                   child: StatCard(
                       icon: Icons.people,
-                      label: 'Qarzdorlar',
+                      label: tr('Qarzdorlar', 'Должники'),
                       value: items.length,
                       color: warn)),
               const SizedBox(width: 12),
               Expanded(
                   child: StatCard(
                       icon: Icons.account_balance_wallet,
-                      label: 'Umumiy qarz',
+                      label: tr('Umumiy qarz', 'Общий долг'),
                       value: total,
                       isMoney: true,
                       color: danger)),
@@ -254,9 +271,9 @@ class _CollectorHomeState extends State<CollectorHome> {
             child: loading
                 ? const ListShimmer()
                 : items.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         icon: Icons.check_circle_outline,
-                        text: 'Qarzdor yo‘q')
+                        text: tr('Qarzdor yo‘q', 'Должников нет'))
                     : RefreshIndicator(
                         color: brand,
                         onRefresh: _load,
@@ -284,7 +301,8 @@ class _CollectorHomeState extends State<CollectorHome> {
                                               fontWeight: FontWeight.w700,
                                               color: ink)),
                                       const SizedBox(height: 2),
-                                      Text('Qarz: ${money(asNum(c['balance']))}',
+                                      Text(
+                                          '${tr('Qarz', 'Долг')}: ${money(asNum(c['balance']))}',
                                           style: const TextStyle(
                                               color: danger,
                                               fontSize: 12.5,
@@ -294,7 +312,7 @@ class _CollectorHomeState extends State<CollectorHome> {
                                 ),
                                 FilledButton(
                                     onPressed: () => _pay(c),
-                                    child: const Text('To‘lov')),
+                                    child: Text(tr('To‘lov', 'Оплата'))),
                               ]),
                             );
                           },
@@ -355,7 +373,8 @@ class _SupervisorHomeState extends State<SupervisorHome> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.zero,
           children: [
-            _header(context, 'Boshqaruv', '${Api.me?['name'] ?? ''}'),
+            _header(context, tr('Boshqaruv', 'Управление'),
+                '${Api.me?['name'] ?? ''}'),
             if (loading)
               const Padding(
                 padding: EdgeInsets.all(16),
@@ -375,7 +394,7 @@ class _SupervisorHomeState extends State<SupervisorHome> {
                       Expanded(
                           child: StatCard(
                               icon: Icons.payments,
-                              label: 'Umumiy savdo',
+                              label: tr('Umumiy savdo', 'Общая продажа'),
                               value: _p(['sales', 'total']),
                               isMoney: true,
                               color: brand)),
@@ -383,7 +402,7 @@ class _SupervisorHomeState extends State<SupervisorHome> {
                       Expanded(
                           child: StatCard(
                               icon: Icons.money,
-                              label: 'Naqd',
+                              label: tr('Naqd', 'Наличные'),
                               value: _p(['sales', 'cash']),
                               isMoney: true,
                               color: ok)),
@@ -393,7 +412,7 @@ class _SupervisorHomeState extends State<SupervisorHome> {
                       Expanded(
                           child: StatCard(
                               icon: Icons.credit_card,
-                              label: 'O‘tkazma',
+                              label: tr('O‘tkazma', 'Перевод'),
                               value: _p(['sales', 'transfer']),
                               isMoney: true,
                               color: info)),
@@ -401,19 +420,21 @@ class _SupervisorHomeState extends State<SupervisorHome> {
                       Expanded(
                           child: StatCard(
                               icon: Icons.error_outline,
-                              label: 'Qarz',
+                              label: tr('Qarz', 'Долг'),
                               value: _p(['sales', 'debt']),
                               isMoney: true,
                               color: danger)),
                     ]),
-                    const SectionTitle('Tashriflar'),
+                    SectionTitle(tr('Tashriflar', 'Визиты')),
                     Panel(
                       child: Column(children: [
-                        _line('Reja', _p(['funnel', 'visits_plan', 'plan'])),
+                        _line(tr('Reja', 'План'),
+                            _p(['funnel', 'visits_plan', 'plan'])),
                         const Divider(height: 20),
-                        _line('Fakt', _p(['funnel', 'visits_plan', 'fact'])),
+                        _line(tr('Fakt', 'Факт'),
+                            _p(['funnel', 'visits_plan', 'fact'])),
                         const Divider(height: 20),
-                        _line('Muvaffaqiyatli %',
+                        _line(tr('Muvaffaqiyatli %', 'Успешные %'),
                             _p(['funnel', 'successful', 'pct'])),
                       ]),
                     ),
