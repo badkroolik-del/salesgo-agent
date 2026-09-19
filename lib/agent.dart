@@ -405,10 +405,6 @@ class _DashboardTabState extends State<DashboardTab> {
 }
 
 // ============ OFLAYN NAVBAT (yuborilmagan zakazlar, 1/2 ptichka) ============
-String payLabel(String p) => p == 'debt'
-    ? tr('Qarz', 'Долг')
-    : (p == 'transfer' ? tr('O‘tkazma', 'Перевод') : tr('Naqd', 'Наличные'));
-
 class OfflineQueueScreen extends StatefulWidget {
   const OfflineQueueScreen({super.key});
   @override
