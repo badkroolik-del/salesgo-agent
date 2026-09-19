@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -51,6 +55,15 @@ jobs:
       - name: Pub get
         run: flutter pub get
 
+      # Brend launcher ikon (xato bo'lsa ham build to'xtamaydi)
+      - name: App icon
+        continue-on-error: true
+        run: |
+          pip install pillow
+          python3 tools/make_icon.py
+          dart pub global activate flutter_launcher_icons
+          dart pub global run flutter_launcher_icons
+
       - name: Build release APK
         run: flutter build apk --release
 
@@ -64,7 +77,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
+          tag_name: v1.1.${{ github.run_number }}
           files: build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
