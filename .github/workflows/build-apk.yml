@@ -18,8 +18,10 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
           channel: 'stable'
+
+      - name: Flutter version
+        run: flutter --version
 
       - name: Flutter create (android)
         run: flutter create --platforms=android --project-name salesgo_agent .
