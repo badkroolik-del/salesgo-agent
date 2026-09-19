@@ -334,6 +334,7 @@ class StatCard extends StatelessWidget {
   final bool isMoney;
   final Color color;
   final VoidCallback? onTap;
+  final bool compact;
   const StatCard({
     super.key,
     required this.icon,
@@ -342,37 +343,46 @@ class StatCard extends StatelessWidget {
     this.isMoney = false,
     this.color = brand,
     this.onTap,
+    this.compact = false,
   });
   @override
   Widget build(BuildContext context) {
+    final ip = compact ? 7.0 : 9.0;
+    final isz = compact ? 17.0 : 20.0;
+    final vf = compact ? 17.0 : 21.0;
+    final lf = compact ? 10.5 : 12.0;
     return Panel(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(compact ? 11 : 14),
       onTap: onTap,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(9),
+            padding: EdgeInsets.all(ip),
             decoration: BoxDecoration(
                 color: color.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(12)),
-            child: Icon(icon, color: color, size: 20),
+                borderRadius: BorderRadius.circular(compact ? 10 : 12)),
+            child: Icon(icon, color: color, size: isz),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: compact ? 8 : 12),
           TweenAnimationBuilder<double>(
             tween: Tween(begin: 0, end: value.toDouble()),
             duration: const Duration(milliseconds: 900),
             curve: Curves.easeOutCubic,
             builder: (_, v, __) => Text(
               isMoney ? shortMoney(v) : v.round().toString(),
-              style: const TextStyle(
-                  fontSize: 21, fontWeight: FontWeight.w900, color: ink),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: vf, fontWeight: FontWeight.w900, color: ink),
             ),
           ),
           const SizedBox(height: 2),
           Text(label,
-              style: const TextStyle(
-                  fontSize: 12, color: muted, fontWeight: FontWeight.w600)),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: lf, color: muted, fontWeight: FontWeight.w600)),
         ],
       ),
     );
