@@ -26,10 +26,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-# Launcher ikon (build vaqtida tools/make_icon.py yasaydi)
+# Launcher ikon (foydalanuvchi bergan aniq logo — assets/icon/icon.png)
 flutter_launcher_icons:
   android: true
   image_path: "assets/icon/icon.png"
-  adaptive_icon_background: "#0F766E"
-  adaptive_icon_foreground: "assets/icon/foreground.png"
+  adaptive_icon_background: "#0E9A5A"
+  adaptive_icon_foreground: "assets/icon/icon.png"
   min_sdk_android: 21
