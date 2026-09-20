@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
@@ -1536,7 +1536,7 @@ class _ClientCardScreenState extends State<ClientCardScreen> {
     if (x == null) return;
     setState(() => photoBusy = true);
     try {
-      final url = await Api.uploadPhoto(File(x.path));
+      final url = await Api.uploadPhoto(x);
       final c = _client;
       await Api.post('/api/clients/$_id', {
         'name': '${c['name'] ?? ''}',
@@ -2877,7 +2877,7 @@ class _ClientFormScreenState extends State<ClientFormScreen> {
     if (x == null) return;
     setState(() => photoBusy = true);
     try {
-      final url = await Api.uploadPhoto(File(x.path));
+      final url = await Api.uploadPhoto(x);
       setState(() => photoUrl = url);
     } catch (e) {
       if (mounted) snack(context, '$e');
@@ -3579,7 +3579,7 @@ class _ProfileTabState extends State<ProfileTab> {
     if (x == null) return;
     setState(() => uploading = true);
     try {
-      final url = await Api.uploadPhoto(File(x.path));
+      final url = await Api.uploadPhoto(x);
       await Api.post('/auth/me/photo', {'photo': url});
       Api.me?['photo'] = url;
       if (mounted) snack(context, tr('Rasm yangilandi', 'Фото обновлено'));
@@ -3920,8 +3920,14 @@ class _VisitScreenState extends State<VisitScreen> {
               ClipRRect(
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(18)),
-                child: Image.file(File(x.path),
-                    height: 340, width: double.infinity, fit: BoxFit.cover),
+                child: FutureBuilder<Uint8List>(
+                    future: x.readAsBytes(),
+                    builder: (c, s) => s.hasData
+                        ? Image.memory(s.data!,
+                            height: 340, width: double.infinity, fit: BoxFit.cover)
+                        : const SizedBox(
+                            height: 340,
+                            child: Center(child: CircularProgressIndicator()))),
               ),
               Padding(
                 padding: const EdgeInsets.all(14),

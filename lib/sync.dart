@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:cross_file/cross_file.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 
@@ -112,7 +113,7 @@ class SyncStore {
   static Future<bool> sendOrQueuePhoto(
       {required int? visitId, required String path, String type = 'shelf'}) async {
     try {
-      final url = await Api.uploadPhoto(File(path));
+      final url = await Api.uploadPhoto(XFile(path));
       await Api.post('/api/photos',
           {'visit_id': visitId, 'type': type, 'file_path': url});
       return true;
@@ -180,8 +181,8 @@ class SyncStore {
         final m = Map<String, dynamic>.from(jsonDecode(s));
         final path = '${m['path']}';
         String? url = m['url'];
-        if (url == null && path.isNotEmpty && File(path).existsSync()) {
-          url = await Api.uploadPhoto(File(path));
+        if (url == null && path.isNotEmpty && !kIsWeb) {
+          url = await Api.uploadPhoto(XFile(path));
         }
         await Api.post('/api/photos', {
           'visit_id': m['visit_id'],

@@ -1,6 +1,8 @@
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
+import 'dart:convert';
 import 'package:share_plus/share_plus.dart';
+// Platformaga bog'liq saqlash/ulashish: mobil = vaqtinchalik fayl + Share,
+// web = brauzer orqali yuklab olish. dart:io / dart:html shu fayllarda izolyatsiya.
+import 'share_io.dart' if (dart.library.html) 'share_web.dart' as platform;
 
 /// CSV yasab ulashish (Excel ochadi). rows — qatorlar ro'yxati.
 Future<void> shareCsv(String fileName, List<List<dynamic>> rows,
@@ -12,12 +14,9 @@ Future<void> shareCsv(String fileName, List<List<dynamic>> rows,
       return '"$s"';
     }).join(','));
   }
-  final dir = await getTemporaryDirectory();
-  final f = File('${dir.path}/$fileName');
   // UTF-8 BOM — Excel kirillcha/lotinchani to'g'ri ochishi uchun
-  await f.writeAsString('﻿${buf.toString()}');
-  await Share.shareXFiles([XFile(f.path, mimeType: 'text/csv')],
-      subject: subject, text: text);
+  final bytes = utf8.encode('﻿${buf.toString()}');
+  await platform.saveShare(fileName, bytes, 'text/csv', subject, text);
 }
 
 /// Serverdan olingan fayl baytlarini (masalan .xlsx) saqlab ulashish.
@@ -26,11 +25,7 @@ Future<void> shareBytes(String fileName, List<int> bytes,
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     String? subject,
     String? text}) async {
-  final dir = await getTemporaryDirectory();
-  final f = File('${dir.path}/$fileName');
-  await f.writeAsBytes(bytes, flush: true);
-  await Share.shareXFiles([XFile(f.path, mimeType: mime)],
-      subject: subject, text: text);
+  await platform.saveShare(fileName, bytes, mime, subject, text);
 }
 
 /// Oddiy matnni ulashish.

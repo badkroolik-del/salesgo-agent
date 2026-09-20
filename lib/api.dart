@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:cross_file/cross_file.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -118,10 +118,12 @@ class Api {
   }
 
   /// Rasm yuklash -> URL qaytaradi.
-  static Future<String> uploadPhoto(File file) async {
+  static Future<String> uploadPhoto(XFile file) async {
     final req = http.MultipartRequest('POST', Uri.parse('$base/api/upload'));
     req.headers['Authorization'] = 'Bearer $token';
-    req.files.add(await http.MultipartFile.fromPath('file', file.path,
+    final bytes = await file.readAsBytes();
+    req.files.add(http.MultipartFile.fromBytes('file', bytes,
+        filename: file.name.isNotEmpty ? file.name : 'photo.jpg',
         contentType: MediaType('image', 'jpeg')));
     final resp = await req.send();
     final body = await resp.stream.bytesToString();
