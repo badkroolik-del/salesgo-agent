@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'theme.dart';
 
@@ -80,6 +79,31 @@ class GradientHeader extends StatelessWidget {
 }
 
 // ---- Animatsiyali radar logo ----
+/// Asl SalesGO logosi — rasm (1:1 piksel, qayta chizilmagan).
+/// [onDark] — qorong'i fonda oq plitka ichida ko'rsatiladi (logo ranglari o'zgarmaydi).
+class BrandLogo extends StatelessWidget {
+  final double height;
+  final bool onDark;
+  final bool full;
+  const BrandLogo({super.key, this.height = 28, this.onDark = false, this.full = false});
+  @override
+  Widget build(BuildContext context) {
+    final img = Image.asset(full ? 'assets/brand/logo_full.png' : 'assets/brand/logo.png',
+        height: height, filterQuality: FilterQuality.high, semanticLabel: 'SalesGO');
+    if (!onDark) return img;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: height * 0.45, vertical: height * 0.30),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(height * 0.6),
+        boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 14, offset: Offset(0, 4))],
+      ),
+      child: img,
+    );
+  }
+}
+
+/// Faqat belgi (navy ❯ + yashil ▶) — aylanib turuvchi yumshoq halqalar bilan (splash/yuklanish).
 class AnimatedLogo extends StatefulWidget {
   final double size;
   const AnimatedLogo({super.key, this.size = 96});
@@ -87,11 +111,9 @@ class AnimatedLogo extends StatefulWidget {
   State<AnimatedLogo> createState() => _AnimatedLogoState();
 }
 
-class _AnimatedLogoState extends State<AnimatedLogo>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(milliseconds: 2400))
-    ..repeat();
+class _AnimatedLogoState extends State<AnimatedLogo> with SingleTickerProviderStateMixin {
+  late final AnimationController _c =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 2400))..repeat();
   @override
   void dispose() {
     _c.dispose();
@@ -100,170 +122,58 @@ class _AnimatedLogoState extends State<AnimatedLogo>
 
   @override
   Widget build(BuildContext context) {
+    final s = widget.size;
     return SizedBox(
-      width: widget.size,
-      height: widget.size,
-      child: AnimatedBuilder(
-        animation: _c,
-        builder: (_, __) => CustomPaint(painter: _LogoPainter(_c.value)),
-      ),
+      width: s,
+      height: s,
+      child: Stack(alignment: Alignment.center, children: [
+        AnimatedBuilder(animation: _c, builder: (_, __) => CustomPaint(size: Size(s, s), painter: _RingPainter(_c.value))),
+        Image.asset('assets/brand/mark.png', width: s * 0.46, filterQuality: FilterQuality.high),
+      ]),
     );
   }
 }
 
-class _LogoPainter extends CustomPainter {
+class _RingPainter extends CustomPainter {
   final double t;
-  _LogoPainter(this.t);
+  _RingPainter(this.t);
   @override
   void paint(Canvas canvas, Size size) {
     final c = Offset(size.width / 2, size.height / 2);
     final maxR = size.width / 2;
     for (int i = 0; i < 3; i++) {
       final p = (t + i / 3) % 1.0;
-      final r = maxR * (0.5 + p * 0.5);
-      final paint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2
-        ..color = Colors.white.withOpacity((1 - p) * 0.45);
-      canvas.drawCircle(c, r, paint);
+      canvas.drawCircle(
+          c,
+          maxR * (0.5 + p * 0.5),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2
+            ..color = brandGreen.withOpacity((1 - p) * 0.35));
     }
-    final badgeR = maxR * 0.52;
-    final rect = Rect.fromCircle(center: c, radius: badgeR);
-    final badge = Paint()
-      ..shader = const LinearGradient(
-        colors: [Colors.white, Color(0xFFE6FFFB)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ).createShader(rect);
-    final rrect =
-        RRect.fromRectAndRadius(rect, Radius.circular(badgeR * 0.52));
-    canvas.drawRRect(rrect, badge);
-    final tp = TextPainter(
-      text: TextSpan(
-        text: 'S',
-        style: TextStyle(
-          color: brand,
-          fontSize: badgeR * 1.35,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, c - Offset(tp.width / 2, tp.height / 2));
   }
 
   @override
-  bool shouldRepaint(covariant _LogoPainter old) => old.t != t;
+  bool shouldRepaint(covariant _RingPainter old) => old.t != t;
 }
 
+/// Eski API bilan mos: [base] oq bo'lsa (qorong'i fon) — logo oq plitkada.
 class Wordmark extends StatelessWidget {
   final double size;
   final Color base;
   const Wordmark({super.key, this.size = 26, this.base = ink});
   @override
-  Widget build(BuildContext context) {
-    final style = TextStyle(
-      fontSize: size,
-      fontWeight: FontWeight.w900,
-      letterSpacing: -0.5,
-    );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('Sales', style: style.copyWith(color: base)),
-        ShaderMask(
-          shaderCallback: (r) =>
-              goGradient.createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
-          child: Text('GO', style: style.copyWith(color: Colors.white)),
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) =>
+      BrandLogo(height: size * 1.05, onDark: base.computeLuminance() > 0.6);
 }
 
-/// Animatsiyali "SalesGO" — "Sales" yaxlit rang, "GO" yashil gradient +
-/// yugurib o'tuvchi shine + hue-rotate (rang aylanadi). Saytdagi kabi.
-class AnimatedWordmark extends StatefulWidget {
+class AnimatedWordmark extends StatelessWidget {
   final double size;
   final Color base;
   const AnimatedWordmark({super.key, this.size = 30, this.base = ink});
   @override
-  State<AnimatedWordmark> createState() => _AnimatedWordmarkState();
-}
-
-class _AnimatedWordmarkState extends State<AnimatedWordmark>
-    with SingleTickerProviderStateMixin {
-  // Saytdagi (salesgo.uz) kabi: yashil gradient + flow (siljish) + hue-rotate
-  static const _g1 = Color(0xFF12994A); // yashil
-  static const _g2 = Color(0xFF7EF2A8); // och yashil
-  late final AnimationController _c = AnimationController(
-      vsync: this, duration: const Duration(seconds: 16))
-    ..repeat();
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  // Hue-rotate matritsasi (rangni to'liq doira bo'ylab aylantiradi)
-  List<double> _hue(double deg) {
-    final rad = deg * math.pi / 180.0;
-    final c = math.cos(rad), s = math.sin(rad);
-    const lr = 0.213, lg = 0.715, lb = 0.072;
-    return <double>[
-      lr + c * (1 - lr) + s * (-lr),
-      lg + c * (-lg) + s * (-lg),
-      lb + c * (-lb) + s * (1 - lb),
-      0, 0,
-      lr + c * (-lr) + s * (0.143),
-      lg + c * (1 - lg) + s * (0.140),
-      lb + c * (-lb) + s * (-0.283),
-      0, 0,
-      lr + c * (-lr) + s * (-(1 - lr)),
-      lg + c * (-lg) + s * (lg),
-      lb + c * (1 - lb) + s * (lb),
-      0, 0,
-      0, 0, 0, 1, 0,
-    ];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final st = TextStyle(
-      fontSize: widget.size,
-      fontWeight: FontWeight.w900,
-      letterSpacing: -0.5,
-      height: 1.0,
-    );
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Sales — yaxlit rang
-        Text('Sales', style: st.copyWith(color: widget.base)),
-        // GO — yashil gradient, oq shine yuguradi (flow), rang aylanadi (hue)
-        AnimatedBuilder(
-          animation: _c,
-          builder: (_, __) {
-            final t = _c.value; // 0..1 (16s)
-            final flow = (t * 16 / 3) % 1.0; // ~3s siljish
-            return ColorFiltered(
-              colorFilter: ColorFilter.matrix(_hue(t * 360)),
-              child: ShaderMask(
-                blendMode: BlendMode.srcIn,
-                shaderCallback: (r) => LinearGradient(
-                  begin: Alignment(-1.0 + flow * 2, 0),
-                  end: Alignment(1.0 + flow * 2, 0),
-                  colors: const [_g1, _g2, _g1],
-                  tileMode: TileMode.mirror,
-                ).createShader(Rect.fromLTWH(0, 0, r.width, r.height)),
-                child: Text('GO', style: st.copyWith(color: Colors.white)),
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
+  Widget build(BuildContext context) =>
+      BrandLogo(height: size * 1.05, onDark: base.computeLuminance() > 0.6);
 }
 
 class GradientButton extends StatelessWidget {

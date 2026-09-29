@@ -1,0 +1,38 @@
+name: Generate upload key (bir marta)
+
+# Google Play uchun upload kalit yaratadi. Natija — 1 kun saqlanadigan artifact:
+#   upload.jks, upload.jks.b64 va parollar. Yuklab olib, qiymatlarni Settings → Secrets → Actions ga qo'shing,
+#   upload.jks faylini xavfsiz joyda (2 nusxa) saqlang — yo'qolsa Play'da yangilanish qiyinlashadi.
+on:
+  workflow_dispatch:
+
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - name: Kalit yaratish
+        run: |
+          mkdir out
+          PASS=$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 24)
+          keytool -genkeypair -v -keystore out/upload.jks -storetype JKS \
+            -storepass "$PASS" -keypass "$PASS" -alias upload \
+            -keyalg RSA -keysize 4096 -validity 10000 \
+            -dname "CN=SalesGO SFA, O=SalesGO, L=Tashkent, C=UZ"
+          base64 -w0 out/upload.jks > out/upload.jks.b64
+          {
+            echo "GitHub Secrets (Settings -> Secrets and variables -> Actions -> New repository secret):"
+            echo ""
+            echo "ANDROID_KEYSTORE_B64      = upload.jks.b64 fayl ichidagi butun matn"
+            echo "ANDROID_KEYSTORE_PASSWORD = $PASS"
+            echo "ANDROID_KEY_ALIAS         = upload"
+            echo "ANDROID_KEY_PASSWORD      = $PASS"
+          } > out/SECRETS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upload-key-MAXFIY
+          path: out/
+          retention-days: 1

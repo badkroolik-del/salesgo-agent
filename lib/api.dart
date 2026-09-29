@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:cross_file/cross_file.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 /// SalesGO backend bilan aloqa.
 class Api {
@@ -22,6 +24,13 @@ class Api {
   }
 
   static Future<void> logout() async {
+    // Fon GPS servisi navbatdagi nuqtalarni yuborib to'xtaydi (token hali bor paytda)
+    if (!kIsWeb) {
+      try {
+        FlutterBackgroundService().invoke('stop');
+        await Future.delayed(const Duration(milliseconds: 1500));
+      } catch (_) {}
+    }
     token = null;
     me = null;
     final p = await SharedPreferences.getInstance();

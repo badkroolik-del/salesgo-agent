@@ -1,15 +1,20 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'api.dart';
 import 'theme.dart';
 import 'ui.dart';
 import 'agent.dart';
 import 'roles.dart';
+import 'tracker.dart';
+import 'mobile_cfg.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Api.loadToken();
   await loadLang();
+  await MobileCfg.load();
+  await Tracker.configure();
   runApp(const SalesGoApp());
 }
 
@@ -23,7 +28,7 @@ class SalesGoApp extends StatelessWidget {
       valueListenable: langVN,
       builder: (_, l, __) => MaterialApp(
         key: ValueKey('app_$l'),
-        title: 'SalesGO',
+        title: 'SalesGO SFA',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
         home: const Root(),
@@ -64,28 +69,21 @@ class _Splash extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(gradient: brandGradient),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const AnimatedWordmark(size: 46, base: Colors.white),
-              const SizedBox(height: 12),
-              Text(tr('Savdo — harakatda', 'Продажи — в движении'),
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.85),
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.3)),
-              const SizedBox(height: 30),
-              SizedBox(
-                height: 26,
-                width: 26,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.4, color: Colors.white.withOpacity(0.9)),
-              ),
-            ],
-          ),
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Column(
+          children: [
+            const Spacer(flex: 3),
+            const Center(child: BrandLogo(height: 78, full: true)),
+            const Spacer(flex: 2),
+            const SizedBox(
+                height: 26, width: 26,
+                child: CircularProgressIndicator(strokeWidth: 2.4, color: brandGreen)),
+            const SizedBox(height: 18),
+            Text(tr('Savdo — harakatda', 'Продажи — в движении'),
+                style: const TextStyle(color: muted, fontWeight: FontWeight.w600, fontSize: 14)),
+            const SizedBox(height: 28),
+          ],
         ),
       ),
     );
@@ -101,6 +99,7 @@ class Gate extends StatefulWidget {
 
 class _GateState extends State<Gate> {
   String? err;
+  bool _started = false;
   @override
   void initState() {
     super.initState();
@@ -121,9 +120,22 @@ class _GateState extends State<Gate> {
     }
   }
 
+  /// Paneldan ilova sozlamalari (majburiyatlar) + fonda GPS (rozilik → ruxsatlar → servis).
+  Future<void> _afterLogin() async {
+    final changed = await MobileCfg.refresh();
+    if (changed) Tracker.pushConfig();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Tracker.ensure(context);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (Api.token == null) return const LoginScreen();
+    if (Api.me != null && !_started) {
+      _started = true;
+      _afterLogin();
+    }
     if (err != null) {
       return Scaffold(
         body: Center(
@@ -201,6 +213,52 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  /// Demo kirish: kompaniya `demo`, parol serverdagi demo parolidan biri.
+  Future<void> _demo(String who) async {
+    comp.text = 'demo';
+    login.text = who;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      busy = true;
+      err = null;
+    });
+    Object? last;
+    for (final p in const ['demo123', '12345']) {
+      try {
+        await Api.login('demo', who, p);
+        pass.text = p;
+        Api.me = null;
+        if (mounted) {
+          Navigator.pushReplacement(
+              context, MaterialPageRoute(builder: (_) => const Gate()));
+        }
+        return;
+      } catch (e) {
+        last = e;
+      }
+    }
+    if (mounted) {
+      setState(() {
+        err = '$last';
+        busy = false;
+      });
+    }
+  }
+
+  Widget _demoBtn(String who, IconData icon, String uz, String ru) => Expanded(
+        child: OutlinedButton.icon(
+          onPressed: busy ? null : () => _demo(who),
+          icon: Icon(icon, color: brand, size: 20),
+          label: Text(tr(uz, ru),
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: brand, fontWeight: FontWeight.w700, fontSize: 14)),
+          style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+              side: const BorderSide(color: line),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+        ),
+      );
+
   Widget _lang(String code, String label) {
     final sel = lang == code;
     return GestureDetector(
@@ -222,8 +280,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF4F7FB),
       body: Container(
-        decoration: const BoxDecoration(gradient: brandGradient),
         child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
@@ -231,8 +289,8 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 children: [
                   const SizedBox(height: 12),
-                  const AnimatedWordmark(size: 40, base: Colors.white),
-                  const SizedBox(height: 24),
+                  const BrandLogo(height: 58, full: true),
+                  const SizedBox(height: 26),
                   Container(
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
@@ -311,25 +369,22 @@ class _LoginScreenState extends State<LoginScreen> {
                           onTap: _login,
                         ),
                         const SizedBox(height: 10),
-                        OutlinedButton.icon(
-                          onPressed: busy
-                              ? null
-                              : () {
-                                  comp.text = 'demo';
-                                  login.text = 'vali';
-                                  pass.text = 'demo123';
-                                  _login();
-                                },
-                          icon: const Icon(Icons.play_circle_outline,
-                              color: brand),
-                          label: Text(
-                              tr('Demo (sinov) kirish', 'Демо (тест) вход'),
-                              style: const TextStyle(
-                                  color: brand, fontWeight: FontWeight.w700)),
-                          style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              side: const BorderSide(color: brand)),
-                        ),
+                        // Demo: har bir rolni o'rnatmasdan ko'rish (web versiya va Play tekshiruvchilari uchun)
+                        Text(tr('Demo (sinov) kirish', 'Демо (тест) вход'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: muted, fontWeight: FontWeight.w700, fontSize: 14)),
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          _demoBtn('vali', Icons.person_pin_circle_outlined, 'Agent', 'Агент'),
+                          const SizedBox(width: 8),
+                          _demoBtn('akmal', Icons.local_shipping_outlined, 'Dostavka', 'Доставка'),
+                        ]),
+                        const SizedBox(height: 8),
+                        Row(children: [
+                          _demoBtn('sher', Icons.account_balance_wallet_outlined, 'Inkassator', 'Инкассатор'),
+                          const SizedBox(width: 8),
+                          _demoBtn('super', Icons.supervisor_account_outlined, 'Supervayzer', 'Супервайзер'),
+                        ]),
                         const SizedBox(height: 12),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -344,10 +399,15 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                      tr('SalesGO · savdo agentlari uchun',
-                          'SalesGO · для торговых агентов'),
-                      style: TextStyle(
-                          color: Colors.white.withOpacity(0.8), fontSize: 12)),
+                      tr('SalesGO SFA · savdo jamoasi uchun',
+                          'SalesGO SFA · для торговой команды'),
+                      style: const TextStyle(color: muted, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  TextButton(
+                      onPressed: () => launchUrl(Uri.parse(privacyUrl),
+                          mode: LaunchMode.externalApplication),
+                      child: Text(tr('Maxfiylik siyosati', 'Политика конфиденциальности'),
+                          style: const TextStyle(color: brand, fontSize: 13))),
                 ],
               ),
             ),

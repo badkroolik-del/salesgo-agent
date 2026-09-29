@@ -4,6 +4,8 @@ import 'theme.dart';
 import 'ui.dart';
 import 'maps.dart';
 import 'main.dart';
+import 'tracker.dart';
+import 'field_visit.dart';
 
 Future<void> _openMap(BuildContext context) async {
   try {
@@ -86,6 +88,17 @@ class _DeliveryHomeState extends State<DeliveryHome> {
     if (mounted) setState(() => loading = false);
   }
 
+  /// Yetkazish vizit bilan: check-in, foto (tovar, nakladnoy), to'lov, yetkazilmasa sabab.
+  Future<void> _deliverVisit(Map o) async {
+    final done = await Navigator.push<bool>(
+        context,
+        fadeRoute(FieldVisitScreen(
+            role: 'delivery',
+            client: {'id': o['client_id'], 'name': o['client_name'], 'lat': o['client_lat'], 'lng': o['client_lng']},
+            order: o)));
+    if (done == true) _load();
+  }
+
   Future<void> _deliver(int id) async {
     try {
       await Api.post('/api/orders/$id/status?status=delivered', {});
@@ -101,6 +114,7 @@ class _DeliveryHomeState extends State<DeliveryHome> {
     return Scaffold(
       body: Column(
         children: [
+          const TrackerBanner(),
           _header(context, tr('Yetkazish', 'Доставка'),
               '${orders.length} ${tr('ta zakaz kutmoqda', 'заказ(ов) ожидает')}'),
           Padding(
@@ -164,8 +178,8 @@ class _DeliveryHomeState extends State<DeliveryHome> {
                                   ),
                                 ),
                                 FilledButton(
-                                    onPressed: () => _deliver(o['id']),
-                                    child: Text(tr('Yetkazdim', 'Доставил'))),
+                                    onPressed: () => _deliverVisit(o),
+                                    child: Text(tr('Yetkazish', 'Доставить'))),
                               ]),
                             );
                           },
@@ -246,6 +260,7 @@ class _CollectorHomeState extends State<CollectorHome> {
     return Scaffold(
       body: Column(
         children: [
+          const TrackerBanner(),
           _header(context, tr('Inkassator', 'Инкассатор'),
               '${items.length} ${tr('ta qarzdor', 'должник(ов)')}'),
           Padding(
@@ -311,7 +326,15 @@ class _CollectorHomeState extends State<CollectorHome> {
                                   ),
                                 ),
                                 FilledButton(
-                                    onPressed: () => _pay(c),
+                                    onPressed: () async {
+                                      final done = await Navigator.push<bool>(
+                                          context,
+                                          fadeRoute(FieldVisitScreen(
+                                              role: 'collector',
+                                              client: {'id': c['id'] ?? c['client_id'], 'name': c['name'], 'lat': c['lat'], 'lng': c['lng']},
+                                              debt: asNum(c['balance']))));
+                                      if (done == true) _load();
+                                    },
                                     child: Text(tr('To‘lov', 'Оплата'))),
                               ]),
                             );
@@ -373,8 +396,18 @@ class _SupervisorHomeState extends State<SupervisorHome> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.zero,
           children: [
+            const TrackerBanner(),
             _header(context, tr('Boshqaruv', 'Управление'),
                 '${Api.me?['name'] ?? ''}'),
+            if (Api.me?['role'] == 'supervisor')
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: GradientButton(
+                  text: tr('Birgalikdagi tashrif / audit', 'Совместный визит / аудит'),
+                  icon: Icons.fact_check_outlined,
+                  onTap: () => _jointVisit(context),
+                ),
+              ),
             if (loading)
               const Padding(
                 padding: EdgeInsets.all(16),
@@ -454,4 +487,53 @@ class _SupervisorHomeState extends State<SupervisorHome> {
             style: const TextStyle(
                 fontWeight: FontWeight.w800, fontSize: 16, color: ink)),
       ]);
+}
+
+/// Supervayzer: mijozni tanlab birgalikdagi tashrif / audit.
+Future<void> _jointVisit(BuildContext context) async {
+  List items = [];
+  try {
+    final d = await Api.get('/api/clients?limit=500');
+    items = (d is Map ? d['items'] : d) ?? [];
+  } catch (_) {}
+  if (!context.mounted) return;
+  final q = ValueNotifier<String>('');
+  final c = await showModalBottomSheet<Map>(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => SafeArea(
+      child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.8,
+        child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              autofocus: true,
+              onChanged: (v) => q.value = v.toLowerCase(),
+              decoration: InputDecoration(hintText: tr('Mijozni qidirish', 'Поиск клиента'), prefixIcon: const Icon(Icons.search)),
+            ),
+          ),
+          Expanded(
+            child: ValueListenableBuilder<String>(
+              valueListenable: q,
+              builder: (_, s, __) {
+                final L = items.where((x) => '${x['name']} ${x['code'] ?? ''}'.toLowerCase().contains(s)).take(200).toList();
+                return ListView.builder(
+                  itemCount: L.length,
+                  itemBuilder: (_, i) => ListTile(
+                    leading: Avatar('${L[i]['name'] ?? '?'}', size: 36),
+                    title: Text('${L[i]['name'] ?? ''}'),
+                    subtitle: Text('${L[i]['address'] ?? L[i]['territory_name'] ?? ''}'),
+                    onTap: () => Navigator.pop(context, L[i] as Map),
+                  ),
+                );
+              },
+            ),
+          ),
+        ]),
+      ),
+    ),
+  );
+  if (c == null || !context.mounted) return;
+  await Navigator.push(context, fadeRoute(FieldVisitScreen(role: 'supervisor', client: c)));
 }

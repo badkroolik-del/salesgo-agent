@@ -11,6 +11,8 @@ import 'maps.dart';
 import 'main.dart';
 import 'sync.dart';
 import 'share_util.dart';
+import 'tracker.dart';
+import 'mobile_cfg.dart';
 
 String _today() => DateTime.now().toIso8601String().substring(0, 10);
 
@@ -26,51 +28,24 @@ class AgentShell extends StatefulWidget {
 
 class _AgentShellState extends State<AgentShell> {
   int idx = 0;
-  Timer? gpsTimer;
-  bool gpsOn = false;
+  // GPS endi fonda ishlaydigan servisda (tracker.dart) — ilova yopiq bo'lsa ham
+  bool get gpsOn => Tracker.state.value == TrackState.on;
+
+  void _ts() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
-    _startGps();
+    Tracker.state.addListener(_ts);
+    Tracker.refresh();
   }
 
   @override
   void dispose() {
-    gpsTimer?.cancel();
+    Tracker.state.removeListener(_ts);
     super.dispose();
-  }
-
-  Future<void> _startGps() async {
-    try {
-      if (!await Geolocator.isLocationServiceEnabled()) return;
-      var p = await Geolocator.checkPermission();
-      if (p == LocationPermission.denied) {
-        p = await Geolocator.requestPermission();
-      }
-      if (p == LocationPermission.denied ||
-          p == LocationPermission.deniedForever) return;
-      setState(() => gpsOn = true);
-      _sendGps();
-      gpsTimer =
-          Timer.periodic(const Duration(seconds: 60), (_) => _sendGps());
-    } catch (_) {}
-  }
-
-  Future<void> _sendGps() async {
-    try {
-      final pos = await Geolocator.getCurrentPosition();
-      await Api.post('/api/gps', {
-        'points': [
-          {
-            'lat': pos.latitude,
-            'lng': pos.longitude,
-            'speed': pos.speed,
-            'ts': DateTime.now().toIso8601String().substring(0, 19),
-          }
-        ]
-      });
-    } catch (_) {}
   }
 
   @override
@@ -83,7 +58,10 @@ class _AgentShellState extends State<AgentShell> {
       const ProfileTab(),
     ];
     return Scaffold(
-      body: IndexedStack(index: idx, children: tabs),
+      body: Column(children: [
+        const TrackerBanner(),
+        Expanded(child: IndexedStack(index: idx, children: tabs)),
+      ]),
       // Suzuvchi (floating) dumaloq pastki menyu — tekis to'rtburchak emas
       bottomNavigationBar: SafeArea(
         top: false,
@@ -274,11 +252,13 @@ class _DashboardTabState extends State<DashboardTab> {
                           color: Colors.white, size: 20),
                     ),
                     const SizedBox(width: 4),
-                    Container(
+                    GestureDetector(
+                      onTap: () => Tracker.ensure(context, force: true),
+                      child: Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.16),
+                          color: widget.gpsOn ? brandGreen.withOpacity(0.9) : danger.withOpacity(0.85),
                           borderRadius: BorderRadius.circular(20)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
                         Icon(widget.gpsOn ? Icons.gps_fixed : Icons.gps_off,
@@ -290,7 +270,7 @@ class _DashboardTabState extends State<DashboardTab> {
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w700)),
                       ]),
-                    ),
+                    )),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -3719,7 +3699,7 @@ class _ProfileTabState extends State<ProfileTab> {
               GradientButton(
                 text: tr('Chiqish', 'Выход'),
                 icon: Icons.logout,
-                gradient: const LinearGradient(colors: [danger, accent2]),
+                gradient: const LinearGradient(colors: [danger, Color(0xFFB42318)]),
                 onTap: () async {
                   await Api.logout();
                   if (context.mounted) {
@@ -3729,7 +3709,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 },
               ),
               const SizedBox(height: 14),
-              const Text('SalesGO v1.6',
+              const Text('SalesGO SFA v2.0',
                   style: TextStyle(color: muted, fontSize: 12)),
             ],
           ),
@@ -3819,6 +3799,9 @@ class VisitScreen extends StatefulWidget {
 
 class _VisitScreenState extends State<VisitScreen> {
   int? visitId;
+  final DateTime started = DateTime.now();
+  bool tooFar = false;
+  bool noGps = false;
   bool busy = false;
   bool checkinFailed = false;
   String result = 'no_order';
@@ -3868,6 +3851,27 @@ class _VisitScreenState extends State<VisitScreen> {
             asNum(widget.client['lat']).toDouble(),
             asNum(widget.client['lng']).toDouble());
       }
+      noGps = pos == null;
+      // Panel: «Начать визит можно только рядом с точкой»
+      if (MobileCfg.radiusReq && distance != null && distance! > MobileCfg.radius) {
+        tooFar = true;
+        if (mounted) {
+          setState(() => checkinFailed = true);
+          await showDialog(
+            context: context,
+            builder: (_) => AlertDialog(
+              icon: const Icon(Icons.location_off, color: danger, size: 40),
+              title: Text(tr('Nuqtadan uzoqdasiz', 'Вы далеко от точки')),
+              content: Text(tr(
+                  'Siz mijozdan ${distance!.round()} m uzoqdasiz. Tashrifni faqat ${MobileCfg.radius.round()} m ichida boshlash mumkin.',
+                  'Вы в ${distance!.round()} м от клиента. Начать визит можно только в радиусе ${MobileCfg.radius.round()} м.')),
+              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+            ),
+          );
+        }
+        return;
+      }
+      tooFar = false;
       final id = await SyncStore.sendOrQueueVisit({
         'client_id': widget.client['id'],
         'lat': pos?.latitude,
@@ -4063,6 +4067,20 @@ class _VisitScreenState extends State<VisitScreen> {
   }
 
   Future<void> _checkout() async {
+    // Panel majburiyatlari: minimal vaqt, foto soni, rad etish sababi
+    final mins = DateTime.now().difference(started).inSeconds / 60.0;
+    if (MobileCfg.minVisitMin > 0 && mins < MobileCfg.minVisitMin) {
+      snack(context, tr('Tashrif kamida ${MobileCfg.minVisitMin} daqiqa bo‘lishi kerak', 'Визит должен длиться не меньше ${MobileCfg.minVisitMin} мин'));
+      return;
+    }
+    if (MobileCfg.photoMin > 0 && beforeCount + afterCount < MobileCfg.photoMin) {
+      snack(context, tr('Kamida ${MobileCfg.photoMin} ta foto kerak', 'Нужно минимум ${MobileCfg.photoMin} фото'));
+      return;
+    }
+    if (result != 'order' && MobileCfg.refusalReasonReq && comment.text.trim().isEmpty) {
+      snack(context, tr('Zakazsiz tashrif — sababini izohda yozing', 'Визит без заказа — укажите причину в комментарии'));
+      return;
+    }
     try {
       final cm = Uri.encodeComponent(comment.text.trim());
       await Api.post(
@@ -4202,6 +4220,15 @@ class _VisitScreenState extends State<VisitScreen> {
                         sub: tr('Mahsulot tanlab savat yaratish',
                             'Выбрать товары в корзину'),
                         onTap: () async {
+                          // Panel majburiyatlari: zakazdan oldin foto / GPS
+                          if (MobileCfg.photoBeforeOrder && beforeCount + afterCount == 0) {
+                            snack(context, tr('Avval foto oling (panel talabi)', 'Сначала сделайте фото (требование компании)'));
+                            return;
+                          }
+                          if (MobileCfg.blockOrderNoGps && noGps) {
+                            snack(context, tr('GPS yo‘q — zakaz berib bo‘lmaydi', 'Нет GPS — заказ недоступен'));
+                            return;
+                          }
                           final okr = await Navigator.push<Map>(
                               context,
                               fadeRoute(OrderScreen(
@@ -4285,7 +4312,7 @@ class _VisitScreenState extends State<VisitScreen> {
                         text: tr('Tashrifni yakunlash', 'Завершить визит'),
                         icon: Icons.logout,
                         gradient:
-                            const LinearGradient(colors: [danger, accent2]),
+                            const LinearGradient(colors: [danger, Color(0xFFB42318)]),
                         onTap: _checkout,
                       ),
                     ],

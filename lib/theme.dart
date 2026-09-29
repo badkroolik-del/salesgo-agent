@@ -1,35 +1,37 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// ============ SalesGO brend palitrasi ============
-const brand = Color(0xFF10B981); // emerald
-const brand2 = Color(0xFF06B6D4); // cyan
-const brandDark = Color(0xFF0F766E);
-const accent = Color(0xFFF97316); // orange (GO)
-const accent2 = Color(0xFFEF4444); // red (GO)
+// ============ SalesGO brend palitrasi (logo: navy ❯ + yashil ▶) ============
+const brandNavy = Color(0xFF02255B); // logo «Sales» / chevron
+const brandGreen = Color(0xFF21A94D); // logo «GO» / uchburchak
+const brand = Color(0xFF0B3A74); // asosiy (tugma, tanlov)
+const brand2 = Color(0xFF1D4A8F); // gradient ikkinchi rang
+const brandDark = brandNavy;
+const accent = brandGreen; // eski «GO» urg'usi o'rniga — brend yashil
+const accent2 = Color(0xFF15803D);
 const bg = Color(0xFFF1F5F9);
 const ink = Color(0xFF0F172A);
-const muted = Color(0xFF64748B);
+const muted = Color(0xFF4E6470);
 const line = Color(0xFFE2E8F0);
-const danger = Color(0xFFEF4444);
-const ok = Color(0xFF22C55E);
+const danger = Color(0xFFDC2626);
+const ok = Color(0xFF15803D);
 const warn = Color(0xFFF59E0B);
-const info = Color(0xFF3B82F6);
-const violet = Color(0xFF8B5CF6);
+const info = Color(0xFF1D4A8F);
+const violet = Color(0xFF6D28D9);
 
 const brandGradient = LinearGradient(
-  colors: [brand, brand2],
+  colors: [brandNavy, brand2],
   begin: Alignment.topLeft,
   end: Alignment.bottomRight,
 );
 const goGradient = LinearGradient(
-  colors: [accent, accent2],
+  colors: [brandGreen, accent2],
   begin: Alignment.topLeft,
   end: Alignment.bottomRight,
 );
-// Pastki menyu uchun 2 yonli (chap yashil -> o'ng ko'k) gorizontal gradient
+// Pastki menyu: navy gorizontal gradient
 const navGradient = LinearGradient(
-  colors: [brand, brand2],
+  colors: [brandNavy, brand2],
   begin: Alignment.centerLeft,
   end: Alignment.centerRight,
 );

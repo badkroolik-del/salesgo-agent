@@ -1,4 +1,4 @@
-name: Build SalesGO APK
+name: Build SalesGO SFA (APK + AAB + Web)
 
 on:
   push:
@@ -31,95 +31,76 @@ jobs:
         run: flutter --version
 
       - name: Flutter create (android)
-        run: flutter create --platforms=android --project-name salesgo_agent .
+        run: flutter create --platforms=android --org uz.salesgo --project-name salesgo_agent .
 
-      - name: Add permissions
-        run: |
-          python3 - <<'PY'
-          import re
-          p = "android/app/src/main/AndroidManifest.xml"
-          s = open(p, encoding="utf-8").read()
-          perms = (
-            '    <uses-permission android:name="android.permission.INTERNET"/>\n'
-            '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n'
-            '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n'
-            '    <uses-permission android:name="android.permission.CAMERA"/>\n'
-          )
-          if "ACCESS_FINE_LOCATION" not in s:
-              s = re.sub(r"(<manifest[^>]*>)", lambda m: m.group(1) + "\n" + perms, s, count=1)
-          queries = (
-            '  <queries>\n'
-            '    <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="https"/></intent>\n'
-            '    <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="geo"/></intent>\n'
-            '  </queries>\n'
-          )
-          if "<queries>" not in s:
-              s = re.sub(r"(<manifest[^>]*>)", lambda m: m.group(1) + "\n" + queries, s, count=1)
-          s = s.replace('android:label="salesgo_agent"', 'android:label="SalesGO"')
-          open(p, "w", encoding="utf-8").write(s)
-          print("manifest patched")
-          PY
+      - name: Android sozlamalari (Play talablari)
+        run: python3 tools/android_setup.py .
 
       - name: Pub get
         run: flutter pub get
 
-      # Brend launcher ikon: foydalanuvchi bergan aniq logo serverdan olinadi;
-      # bo'lmasa make_icon.py bilan yaratiladi. (xato bo'lsa ham build davom etadi)
-      - name: App icon
-        continue-on-error: true
+      - name: Launcher ikon (asl SalesGO belgisi)
         run: |
-          mkdir -p assets/icon
-          if curl -fsSL https://salesgo.uz/uploads/appicon.png -o assets/icon/icon.png; then
-            cp assets/icon/icon.png assets/icon/foreground.png
-            echo "Custom icon downloaded"
-          else
-            pip install pillow && python3 tools/make_icon.py
-          fi
           dart pub global activate flutter_launcher_icons
           dart pub global run flutter_launcher_icons
 
-      # Doimiy imzo kaliti: bir marta yaratiladi va repoga saqlanadi.
-      # Shunda har build bir xil imzo -> yangi APK eski ustiga o'rnatiladi.
-      - name: Stable signing key
+      # Imzo: Google Play upload key — GitHub Secrets dan (Settings → Secrets → Actions):
+      #   ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+      # Kalit hali bo'lmasa: Actions → «Generate upload key» ni bir marta ishga tushiring.
+      - name: Imzo kaliti
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          mkdir -p ~/.android
-          if git cat-file -e HEAD:ci/debug.keystore.b64 2>/dev/null; then
-            git show HEAD:ci/debug.keystore.b64 | base64 -d > ~/.android/debug.keystore
-            echo "Reused committed keystore"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > android/app/upload.jks
+            printf "storePassword=%s\nkeyPassword=%s\nkeyAlias=%s\nstoreFile=upload.jks\n" "$KS_PASS" "$KEY_PASS" "$KEY_ALIAS" > android/key.properties
+            echo "SIGNED=release" >> $GITHUB_ENV
+            echo "Upload key bilan imzolanadi"
           else
-            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
-              -storepass android -keypass android -alias androiddebugkey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-            mkdir -p ci
-            base64 -w0 ~/.android/debug.keystore > ci/debug.keystore.b64
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add ci/debug.keystore.b64
-            git commit -m "Add stable signing keystore [skip ci]"
-            git push || echo "push failed (keystore used for this build only)"
-            echo "Generated new keystore"
+            mkdir -p ~/.android
+            if git cat-file -e HEAD:ci/debug.keystore.b64 2>/dev/null; then
+              git show HEAD:ci/debug.keystore.b64 | base64 -d > ~/.android/debug.keystore
+            fi
+            echo "SIGNED=debug" >> $GITHUB_ENV
+            echo "::warning::Upload key yo'q — APK sinov (debug) kaliti bilan imzolandi. Google Play uchun kalit qo'shing."
           fi
 
-      - name: Build release APK
+      - name: Build APK (to'g'ridan-to'g'ri o'rnatish uchun)
         run: flutter build apk --release
 
-      - name: Upload APK artifact
+      - name: Build AAB (Google Play uchun)
+        if: env.SIGNED == 'release'
+        run: flutter build appbundle --release
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: salesgo-agent-apk
+          name: salesgo-sfa-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload AAB
+        if: env.SIGNED == 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: salesgo-sfa-aab-google-play
+          path: build/app/outputs/bundle/release/app-release.aab
 
       - name: Publish to Releases
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.${{ github.run_number }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          tag_name: v2.0.${{ github.run_number }}
+          name: SalesGO SFA 2.0.${{ github.run_number }}
+          files: |
+            build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # ---- Web versiya: brauzerdan test qilish uchun (o'rnatish shart emas) ----
+  # ---- Web versiya: brauzerdan ko'rish/sinash (APK o'rnatish shart emas) ----
+  # https://<login>.github.io/salesgo-agent/ — agent, dostavka, inkassator, supervayzer
   web:
     runs-on: ubuntu-latest
     permissions:
@@ -135,11 +116,15 @@ jobs:
         with:
           channel: 'stable'
       - name: Flutter create (web)
-        run: flutter create --platforms=web --project-name salesgo_agent .
+        run: flutter create --platforms=web --org uz.salesgo --project-name salesgo_agent .
+      - name: Web sozlamalari (nom, ikonka, rang)
+        run: |
+          python3 -m pip install --quiet pillow || true
+          python3 tools/web_setup.py .
       - name: Pub get
         run: flutter pub get
       - name: Build web
-        run: flutter build web --release --base-href /salesgo-agent/
+        run: flutter build web --release --base-href /${{ github.event.repository.name }}/
       - name: Setup Pages
         uses: actions/configure-pages@v5
         with:
